@@ -24,6 +24,7 @@ export interface PricingInterval {
 export interface ChannelModelPricing {
   id?: number
   platform: string
+  service_tier?: string
   models: string[]
   billing_mode: BillingMode
   input_price: number | null

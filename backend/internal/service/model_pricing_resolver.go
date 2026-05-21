@@ -53,8 +53,9 @@ func NewModelPricingResolver(channelService *ChannelService, billingService *Bil
 
 // PricingInput 定价解析输入
 type PricingInput struct {
-	Model   string
-	GroupID *int64 // nil 表示不检查渠道
+	Model       string
+	GroupID     *int64 // nil 表示不检查渠道
+	ServiceTier string
 }
 
 // Resolve 解析模型定价。
@@ -63,7 +64,7 @@ type PricingInput struct {
 func (r *ModelPricingResolver) Resolve(ctx context.Context, input PricingInput) *ResolvedPricing {
 	var chPricing *ChannelModelPricing
 	if input.GroupID != nil && r.channelService != nil {
-		chPricing = r.channelService.GetChannelModelPricing(ctx, *input.GroupID, input.Model)
+		chPricing = r.channelService.GetChannelModelPricing(ctx, *input.GroupID, input.Model, input.ServiceTier)
 		if chPricing != nil {
 			mode := chPricing.BillingMode
 			if mode == "" {
@@ -95,7 +96,7 @@ func (r *ModelPricingResolver) Resolve(ctx context.Context, input PricingInput) 
 		resolved.Source = PricingSourceChannel
 		r.applyTokenOverrides(chPricing, resolved)
 	} else if input.GroupID != nil {
-		r.applyChannelOverrides(ctx, *input.GroupID, input.Model, resolved)
+		r.applyChannelOverrides(ctx, *input.GroupID, input.Model, input.ServiceTier, resolved)
 	}
 
 	return resolved
@@ -113,8 +114,8 @@ func (r *ModelPricingResolver) resolveBasePricing(model string) (*ModelPricing, 
 }
 
 // applyChannelOverrides 应用渠道定价覆盖
-func (r *ModelPricingResolver) applyChannelOverrides(ctx context.Context, groupID int64, model string, resolved *ResolvedPricing) {
-	chPricing := r.channelService.GetChannelModelPricing(ctx, groupID, model)
+func (r *ModelPricingResolver) applyChannelOverrides(ctx context.Context, groupID int64, model, serviceTier string, resolved *ResolvedPricing) {
+	chPricing := r.channelService.GetChannelModelPricing(ctx, groupID, model, serviceTier)
 	if chPricing == nil {
 		return
 	}

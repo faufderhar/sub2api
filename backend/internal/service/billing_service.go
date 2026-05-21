@@ -364,13 +364,17 @@ func (s *BillingService) GetModelPricing(model string) (*ModelPricing, error) {
 
 // GetModelPricingWithChannel 获取模型定价，渠道配置的价格覆盖默认值
 // 仅覆盖渠道中非 nil 的价格字段，nil 字段使用默认定价
-func (s *BillingService) GetModelPricingWithChannel(model string, channelPricing *ChannelModelPricing) (*ModelPricing, error) {
+func (s *BillingService) GetModelPricingWithChannel(model, serviceTier string, channelPricing *ChannelModelPricing) (*ModelPricing, error) {
 	pricing, err := s.GetModelPricing(model)
 	if err != nil {
 		return nil, err
 	}
 	if channelPricing == nil {
 		return pricing, nil
+	}
+	if NormalizeOpenAIFastTierValue(channelPricing.ServiceTier) != NormalizeOpenAIFastTierValue(serviceTier) &&
+		NormalizeOpenAIFastTierValue(channelPricing.ServiceTier) != OpenAIFastTierAny {
+		return nil, ErrModelPricingUnavailable
 	}
 	if channelPricing.InputPrice != nil {
 		pricing.InputPricePerToken = *channelPricing.InputPrice
@@ -501,6 +505,7 @@ func (s *BillingService) computeTokenBreakdown(
 	if applyLongCtx && s.shouldApplySessionLongContextPricing(tokens, pricing) {
 		inputPrice *= pricing.LongContextInputMultiplier
 		outputPrice *= pricing.LongContextOutputMultiplier
+		cacheReadPrice *= pricing.LongContextInputMultiplier
 	}
 
 	bd := &CostBreakdown{}
@@ -600,7 +605,7 @@ func (s *BillingService) calculateCostInternal(model string, tokens UsageTokens,
 	var pricing *ModelPricing
 	var err error
 	if channelPricing != nil {
-		pricing, err = s.GetModelPricingWithChannel(model, channelPricing)
+		pricing, err = s.GetModelPricingWithChannel(model, serviceTier, channelPricing)
 	} else {
 		pricing, err = s.GetModelPricing(model)
 	}

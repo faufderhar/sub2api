@@ -56,6 +56,7 @@ type ChannelRepository interface {
 type channelModelKey struct {
 	groupID  int64
 	platform string // 平台标识
+	tier     string // service_tier
 	model    string // lowercase
 }
 
@@ -211,6 +212,7 @@ func expandPricingToCache(cache *channelCache, ch *Channel, gid int64, platform 
 		if !isPlatformPricingMatch(platform, pricing.Platform) {
 			continue // 跳过非本平台的定价
 		}
+		tier := NormalizeOpenAIFastTierValue(pricing.ServiceTier)
 		// 使用定价条目的原始平台作为缓存 key，防止跨平台同名模型冲突
 		pricingPlatform := pricing.Platform
 		gpKey := channelGroupPlatformKey{groupID: gid, platform: pricingPlatform}
@@ -222,7 +224,7 @@ func expandPricingToCache(cache *channelCache, ch *Channel, gid int64, platform 
 					pricing: pricing,
 				})
 			} else {
-				key := channelModelKey{groupID: gid, platform: pricingPlatform, model: strings.ToLower(model)}
+				key := channelModelKey{groupID: gid, platform: pricingPlatform, tier: tier, model: strings.ToLower(model)}
 				cache.pricingByGroupModel[key] = pricing
 			}
 		}
@@ -378,17 +380,37 @@ func (c *channelCache) matchWildcardMapping(groupID int64, platform, modelLower 
 
 // lookupPricingAcrossPlatforms 在分组平台内查找模型定价。
 // 各平台严格独立，只在本平台内查找（先精确匹配，再通配符）。
-func lookupPricingAcrossPlatforms(cache *channelCache, groupID int64, groupPlatform, modelLower string) *ChannelModelPricing {
+func lookupPricingAcrossPlatforms(cache *channelCache, groupID int64, groupPlatform, modelLower, serviceTier string) *ChannelModelPricing {
+	tier := NormalizeOpenAIFastTierValue(serviceTier)
 	for _, p := range matchingPlatforms(groupPlatform) {
-		key := channelModelKey{groupID: groupID, platform: p, model: modelLower}
+		key := channelModelKey{groupID: groupID, platform: p, tier: tier, model: modelLower}
 		if pricing, ok := cache.pricingByGroupModel[key]; ok {
 			return pricing
+		}
+	}
+	if tier != OpenAIFastTierAny {
+		for _, p := range matchingPlatforms(groupPlatform) {
+			key := channelModelKey{groupID: groupID, platform: p, tier: OpenAIFastTierAny, model: modelLower}
+			if pricing, ok := cache.pricingByGroupModel[key]; ok {
+				return pricing
+			}
 		}
 	}
 	// 精确查找全部失败，依次尝试通配符匹配
 	for _, p := range matchingPlatforms(groupPlatform) {
 		if pricing := cache.matchWildcard(groupID, p, modelLower); pricing != nil {
-			return pricing
+			if NormalizeOpenAIFastTierValue(pricing.ServiceTier) == tier || NormalizeOpenAIFastTierValue(pricing.ServiceTier) == OpenAIFastTierAny {
+				return pricing
+			}
+		}
+	}
+	if tier != OpenAIFastTierAny {
+		for _, p := range matchingPlatforms(groupPlatform) {
+			if pricing := cache.matchWildcard(groupID, p, modelLower); pricing != nil {
+				if NormalizeOpenAIFastTierValue(pricing.ServiceTier) == OpenAIFastTierAny {
+					return pricing
+				}
+			}
 		}
 	}
 	return nil
@@ -462,7 +484,7 @@ func (s *ChannelService) lookupGroupChannel(ctx context.Context, groupID int64) 
 
 // GetChannelModelPricing 获取指定分组+模型的渠道定价（热路径 O(1)）。
 // 各平台严格独立，只在本平台内查找定价。
-func (s *ChannelService) GetChannelModelPricing(ctx context.Context, groupID int64, model string) *ChannelModelPricing {
+func (s *ChannelService) GetChannelModelPricing(ctx context.Context, groupID int64, model, serviceTier string) *ChannelModelPricing {
 	lk, err := s.lookupGroupChannel(ctx, groupID)
 	if err != nil {
 		slog.Warn("failed to load channel cache", "group_id", groupID, "error", err)
@@ -473,7 +495,7 @@ func (s *ChannelService) GetChannelModelPricing(ctx context.Context, groupID int
 	}
 
 	modelLower := strings.ToLower(model)
-	pricing := lookupPricingAcrossPlatforms(lk.cache, groupID, lk.platform, modelLower)
+	pricing := lookupPricingAcrossPlatforms(lk.cache, groupID, lk.platform, modelLower, serviceTier)
 	if pricing == nil {
 		return nil
 	}
@@ -551,7 +573,7 @@ func checkRestricted(lk *channelLookup, groupID int64, model string) bool {
 	}
 	modelLower := strings.ToLower(model)
 	// 使用与查找定价相同的跨平台逻辑
-	if lookupPricingAcrossPlatforms(lk.cache, groupID, lk.platform, modelLower) != nil {
+	if lookupPricingAcrossPlatforms(lk.cache, groupID, lk.platform, modelLower, OpenAIFastTierAny) != nil {
 		return false
 	}
 	return true

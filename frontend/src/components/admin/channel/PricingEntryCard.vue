@@ -92,6 +92,19 @@
               class="mt-1"
             />
           </div>
+          <div class="w-32">
+            <label class="text-xs font-medium text-gray-500 dark:text-gray-400">service_tier</label>
+            <Select
+              :modelValue="entry.service_tier || 'all'"
+              @update:modelValue="emit('update', { ...entry, service_tier: $event as string })"
+              :options="[
+                { value: 'all', label: 'all' },
+                { value: 'priority', label: 'priority' },
+                { value: 'flex', label: 'flex' }
+              ]"
+              class="mt-1"
+            />
+          </div>
         </div>
 
         <!-- Token mode -->

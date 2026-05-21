@@ -499,6 +499,18 @@ const (
 	OpenAIFastTierFlex     = "flex"     // 仅匹配 flex
 )
 
+func NormalizeOpenAIFastTierValue(raw string) string {
+	tier := strings.ToLower(strings.TrimSpace(raw))
+	switch tier {
+	case "", OpenAIFastTierAny:
+		return OpenAIFastTierAny
+	case OpenAIFastTierPriority, OpenAIFastTierFlex:
+		return tier
+	default:
+		return OpenAIFastTierAny
+	}
+}
+
 // OpenAIFastPolicyRule 单条 OpenAI fast/flex 策略规则
 type OpenAIFastPolicyRule struct {
 	ServiceTier          string   `json:"service_tier"`                     // "priority" | "flex" | "auto" | "default" | "scale" | "all"

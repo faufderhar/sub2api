@@ -14,6 +14,7 @@ export interface IntervalFormEntry {
 
 export interface PricingFormEntry {
   models: string[]
+  service_tier: string
   billing_mode: BillingMode
   input_price: number | string | null
   output_price: number | string | null
@@ -58,6 +59,11 @@ export function apiIntervalsToForm(intervals: PricingInterval[]): IntervalFormEn
     per_request_price: iv.per_request_price,
     sort_order: iv.sort_order
   }))
+}
+
+export function normalizeServiceTier(tier: string | null | undefined): string {
+  const value = (tier || '').trim().toLowerCase()
+  return value === 'priority' || value === 'flex' ? value : 'all'
 }
 
 export function formIntervalsToAPI(intervals: IntervalFormEntry[]): PricingInterval[] {

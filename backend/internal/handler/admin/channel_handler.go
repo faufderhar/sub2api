@@ -58,6 +58,7 @@ type updateChannelRequest struct {
 
 type channelModelPricingRequest struct {
 	Platform         string                   `json:"platform" binding:"omitempty,max=50"`
+	ServiceTier      string                   `json:"service_tier" binding:"omitempty,oneof=all priority flex"`
 	Models           []string                 `json:"models" binding:"required,min=1,max=100"`
 	BillingMode      string                   `json:"billing_mode" binding:"omitempty,oneof=token per_request image"`
 	InputPrice       *float64                 `json:"input_price" binding:"omitempty,min=0"`
@@ -109,6 +110,7 @@ type channelResponse struct {
 type channelModelPricingResponse struct {
 	ID               int64                     `json:"id"`
 	Platform         string                    `json:"platform"`
+	ServiceTier      string                    `json:"service_tier"`
 	Models           []string                  `json:"models"`
 	BillingMode      string                    `json:"billing_mode"`
 	InputPrice       *float64                  `json:"input_price"`
@@ -216,6 +218,7 @@ func pricingToResponse(p *service.ChannelModelPricing) channelModelPricingRespon
 	return channelModelPricingResponse{
 		ID:               p.ID,
 		Platform:         platform,
+		ServiceTier:      service.NormalizeOpenAIFastTierValue(p.ServiceTier),
 		Models:           models,
 		BillingMode:      billingMode,
 		InputPrice:       p.InputPrice,
@@ -251,6 +254,7 @@ func pricingRequestToService(reqs []channelModelPricingRequest) []service.Channe
 			billingMode = service.BillingModeToken
 		}
 		platform := r.Platform
+		serviceTier := service.NormalizeOpenAIFastTierValue(r.ServiceTier)
 		intervals := make([]service.PricingInterval, 0, len(r.Intervals))
 		for _, iv := range r.Intervals {
 			intervals = append(intervals, service.PricingInterval{
@@ -267,6 +271,7 @@ func pricingRequestToService(reqs []channelModelPricingRequest) []service.Channe
 		}
 		result = append(result, service.ChannelModelPricing{
 			Platform:         platform,
+			ServiceTier:      serviceTier,
 			Models:           r.Models,
 			BillingMode:      billingMode,
 			InputPrice:       r.InputPrice,
@@ -353,6 +358,7 @@ func (h *ChannelHandler) Create(c *gin.Context) {
 		if pricing[i].Platform == "" {
 			pricing[i].Platform = service.PlatformAnthropic
 		}
+		pricing[i].ServiceTier = service.NormalizeOpenAIFastTierValue(pricing[i].ServiceTier)
 	}
 
 	var statsRules []service.AccountStatsPricingRule
@@ -426,6 +432,7 @@ func (h *ChannelHandler) Update(c *gin.Context) {
 			if pricing[i].Platform == "" {
 				pricing[i].Platform = service.PlatformAnthropic
 			}
+			pricing[i].ServiceTier = service.NormalizeOpenAIFastTierValue(pricing[i].ServiceTier)
 		}
 		input.ModelPricing = &pricing
 	}
