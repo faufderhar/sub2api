@@ -16,7 +16,7 @@ func TestParsePricingData_ParsesPriorityAndServiceTierFields(t *testing.T) {
 			"input_cost_per_token": 0.0000025,
 			"input_cost_per_token_priority": 0.000005,
 			"output_cost_per_token": 0.000015,
-			"output_cost_per_token_priority": 0.00003,
+			"output_cost_per_token_priority": 0.0000225,
 			"cache_creation_input_token_cost": 0.0000025,
 			"cache_read_input_token_cost": 0.00000025,
 			"cache_read_input_token_cost_priority": 0.0000005,
@@ -32,7 +32,7 @@ func TestParsePricingData_ParsesPriorityAndServiceTierFields(t *testing.T) {
 	pricing := data["gpt-5.4"]
 	require.NotNil(t, pricing)
 	require.InDelta(t, 5e-6, pricing.InputCostPerTokenPriority, 1e-12)
-	require.InDelta(t, 3e-5, pricing.OutputCostPerTokenPriority, 1e-12)
+	require.InDelta(t, 22.5e-6, pricing.OutputCostPerTokenPriority, 1e-12)
 	require.InDelta(t, 5e-7, pricing.CacheReadInputTokenCostPriority, 1e-12)
 	require.True(t, pricing.SupportsServiceTier)
 }
@@ -184,7 +184,7 @@ func TestParsePricingData_PreservesPriorityAndServiceTierFields(t *testing.T) {
 			"input_cost_per_token":                 2.5e-6,
 			"input_cost_per_token_priority":        5e-6,
 			"output_cost_per_token":                15e-6,
-			"output_cost_per_token_priority":       30e-6,
+			"output_cost_per_token_priority":       22.5e-6,
 			"cache_read_input_token_cost":          0.25e-6,
 			"cache_read_input_token_cost_priority": 0.5e-6,
 			"supports_service_tier":                true,
@@ -205,7 +205,7 @@ func TestParsePricingData_PreservesPriorityAndServiceTierFields(t *testing.T) {
 	require.InDelta(t, 2.5e-6, pricing.InputCostPerToken, 1e-12)
 	require.InDelta(t, 5e-6, pricing.InputCostPerTokenPriority, 1e-12)
 	require.InDelta(t, 15e-6, pricing.OutputCostPerToken, 1e-12)
-	require.InDelta(t, 30e-6, pricing.OutputCostPerTokenPriority, 1e-12)
+	require.InDelta(t, 22.5e-6, pricing.OutputCostPerTokenPriority, 1e-12)
 	require.InDelta(t, 0.25e-6, pricing.CacheReadInputTokenCost, 1e-12)
 	require.InDelta(t, 0.5e-6, pricing.CacheReadInputTokenCostPriority, 1e-12)
 	require.True(t, pricing.SupportsServiceTier)
@@ -218,7 +218,7 @@ func TestParsePricingData_PreservesServiceTierPriorityFields(t *testing.T) {
 			"input_cost_per_token": 0.0000025,
 			"input_cost_per_token_priority": 0.000005,
 			"output_cost_per_token": 0.000015,
-			"output_cost_per_token_priority": 0.00003,
+				"output_cost_per_token_priority": 0.0000225,
 			"cache_read_input_token_cost": 0.00000025,
 			"cache_read_input_token_cost_priority": 0.0000005,
 			"supports_service_tier": true,
@@ -233,7 +233,7 @@ func TestParsePricingData_PreservesServiceTierPriorityFields(t *testing.T) {
 	require.InDelta(t, 0.0000025, pricing.InputCostPerToken, 1e-12)
 	require.InDelta(t, 0.000005, pricing.InputCostPerTokenPriority, 1e-12)
 	require.InDelta(t, 0.000015, pricing.OutputCostPerToken, 1e-12)
-	require.InDelta(t, 0.00003, pricing.OutputCostPerTokenPriority, 1e-12)
+	require.InDelta(t, 0.0000225, pricing.OutputCostPerTokenPriority, 1e-12)
 	require.InDelta(t, 0.00000025, pricing.CacheReadInputTokenCost, 1e-12)
 	require.InDelta(t, 0.0000005, pricing.CacheReadInputTokenCostPriority, 1e-12)
 	require.True(t, pricing.SupportsServiceTier)

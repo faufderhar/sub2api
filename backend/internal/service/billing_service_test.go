@@ -131,7 +131,7 @@ func TestGetModelPricing_OpenAIGPT54Fallback(t *testing.T) {
 	require.NotNil(t, pricing)
 	require.InDelta(t, 2.5e-6, pricing.InputPricePerToken, 1e-12)
 	require.InDelta(t, 15e-6, pricing.OutputPricePerToken, 1e-12)
-	require.InDelta(t, 30e-6, pricing.OutputPricePerTokenPriority, 1e-12)
+	require.InDelta(t, 22.5e-6, pricing.OutputPricePerTokenPriority, 1e-12)
 	require.InDelta(t, 0.25e-6, pricing.CacheReadPricePerToken, 1e-12)
 	require.InDelta(t, 0.5e-6, pricing.CacheReadPricePerTokenPriority, 1e-12)
 	require.InDelta(t, 0.5e-6, pricing.CacheReadLongContextPricePerToken, 1e-12)
@@ -635,7 +635,7 @@ func TestBillingServiceGetModelPricing_UsesDynamicPriorityFields(t *testing.T) {
 				InputCostPerToken:                      2.5e-6,
 				InputCostPerTokenPriority:              5e-6,
 				OutputCostPerToken:                     15e-6,
-				OutputCostPerTokenPriority:             30e-6,
+				OutputCostPerTokenPriority:             22.5e-6,
 				CacheCreationInputTokenCost:            2.5e-6,
 				CacheReadInputTokenCost:                0.25e-6,
 				CacheReadInputTokenCostPriority:        0.5e-6,
@@ -653,7 +653,7 @@ func TestBillingServiceGetModelPricing_UsesDynamicPriorityFields(t *testing.T) {
 	require.InDelta(t, 2.5e-6, pricing.InputPricePerToken, 1e-12)
 	require.InDelta(t, 5e-6, pricing.InputPricePerTokenPriority, 1e-12)
 	require.InDelta(t, 15e-6, pricing.OutputPricePerToken, 1e-12)
-	require.InDelta(t, 30e-6, pricing.OutputPricePerTokenPriority, 1e-12)
+	require.InDelta(t, 22.5e-6, pricing.OutputPricePerTokenPriority, 1e-12)
 	require.InDelta(t, 0.25e-6, pricing.CacheReadPricePerToken, 1e-12)
 	require.InDelta(t, 0.5e-6, pricing.CacheReadPricePerTokenPriority, 1e-12)
 	require.InDelta(t, 0.5e-6, pricing.CacheReadLongContextPricePerToken, 1e-12)
