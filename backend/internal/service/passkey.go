@@ -159,7 +159,11 @@ func verifyPasskeyPassword(user *User, password string) error {
 	if password == "" {
 		return ErrPasswordRequired
 	}
-	if user == nil || !user.CheckPassword(password) {
+	if user == nil {
+		equalizeUserPasswordCheckTiming(password)
+		return ErrPasswordIncorrect
+	}
+	if !user.CheckPassword(password) {
 		return ErrPasswordIncorrect
 	}
 	return nil

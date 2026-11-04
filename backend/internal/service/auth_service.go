@@ -557,6 +557,8 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (string
 	user, err := s.userRepo.GetByEmail(ctx, email)
 	if err != nil {
 		if errors.Is(err, ErrUserNotFound) {
+			// BD-5：账号不存在也跑一次同成本 bcrypt，耗时与密码错误路径一致
+			s.equalizePasswordCheckTiming(password)
 			return "", nil, s.recordLoginFailure(ctx, lockoutSubjects, ErrInvalidCredentials)
 		}
 		// 记录数据库错误但不暴露给用户

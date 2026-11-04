@@ -480,17 +480,20 @@ func (s *AuthService) ValidatePasswordCredentials(ctx context.Context, email, pa
 	user, err := s.userRepo.GetByEmail(ctx, strings.TrimSpace(strings.ToLower(email)))
 	if err != nil {
 		if errors.Is(err, ErrUserNotFound) {
+			// BD-5：账号不存在也跑一次同成本 bcrypt，耗时与密码错误路径一致
+			s.equalizePasswordCheckTiming(password)
 			return nil, s.recordLoginFailure(ctx, lockoutSubjects, ErrInvalidCredentials)
 		}
 		return nil, ErrServiceUnavailable
 	}
-	if !user.IsActive() {
-		return nil, ErrUserNotActive
-	}
+	// 与 Login 一致：先校验密码再判断账号状态，避免不带正确密码就能探测账号存在/禁用状态。
 	if !s.CheckPassword(password, user.PasswordHash) {
 		return nil, s.recordLoginFailure(ctx, lockoutSubjects, ErrInvalidCredentials)
 	}
 	s.resetLoginFailures(ctx, lockoutSubjects)
+	if !user.IsActive() {
+		return nil, ErrUserNotActive
+	}
 	return user, nil
 }
 
