@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { sanitizeHomeContent } from '../sanitize'
+import DOMPurify from 'dompurify'
+import { sanitizeHomeContent, sanitizeSvg } from '../sanitize'
 
 describe('sanitizeHomeContent (L-1)', () => {
   it('去掉 <script>、on* 事件属性和 javascript: 链接', () => {
@@ -55,6 +56,25 @@ describe('sanitizeHomeContent (L-1)', () => {
     )
     expect(out).not.toMatch(/javascript:/i)
     expect(out).not.toMatch(/srcdoc/i)
+  })
+
+  it('D-3：target=_blank 的链接补上 rel="noopener noreferrer"，保留已有 rel 值', () => {
+    const doc = (html: string) => new DOMParser().parseFromString(sanitizeHomeContent(html), 'text/html')
+    const a1 = doc('<a href="https://example.com" target="_blank">ext</a>').querySelector('a')!
+    expect(a1.getAttribute('rel')).toBe('noopener noreferrer')
+    const a2 = doc('<a href="https://example.com" target="_BLANK" rel="nofollow noopener">ext</a>').querySelector('a')!
+    expect(a2.getAttribute('rel')!.split(' ').sort()).toEqual(['nofollow', 'noopener', 'noreferrer'])
+    const a3 = doc('<a href="https://example.com" target="_self">same</a><a href="/x">plain</a>').querySelectorAll('a')
+    expect(a3[0].hasAttribute('rel')).toBe(false)
+    expect(a3[1].hasAttribute('rel')).toBe(false)
+  })
+
+  it('D-3：hook 不污染全局 DOMPurify 及其他清洗函数', () => {
+    sanitizeHomeContent('<a href="https://example.com" target="_blank">warm up</a>')
+    const html = '<a href="https://example.com" target="_blank">ext</a>'
+    expect(DOMPurify.sanitize(html, { ADD_ATTR: ['target'] })).toBe(html)
+    expect(DOMPurify.sanitize(html, { ADD_ATTR: ['target'] })).not.toContain('rel=')
+    expect(sanitizeSvg('<svg><a href="https://example.com" target="_blank"></a></svg>')).not.toContain('noreferrer')
   })
 
   it('空内容返回空字符串', () => {
