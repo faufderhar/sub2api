@@ -100,6 +100,21 @@ The migration runs once; if an admin turns the switch back on in the settings
 page afterwards, later restarts and upgrades keep it. Saving the settings page
 no longer writes `true` back unless the admin actually switched it on.
 
+Once a value is stored in the database it wins over the config file and the
+environment. If you upgraded while `SECURITY_TRUST_FORWARDED_IP_FOR_API_KEY_ACL=true`
+was set explicitly, the migration kept the stored `true` and wrote its marker;
+removing the variable later does **not** turn the switch off (the startup log
+keeps printing the legacy-precedence warning). Turn it off in the admin settings
+page, or run
+`UPDATE settings SET value='false' WHERE key='api_key_acl_trust_forwarded_ip';`
+and restart every instance (the running process keeps its in-memory value until
+restart or a settings save). Do not delete the marker to re-run the migration.
+
+Fresh installs write only the migration markers (and the forwarded-header
+list), not a value row for this switch, so the effective value follows the
+config file / environment (default `false`) until an admin saves a change in
+the settings page.
+
 Deployments behind a proxy must set `server.trusted_proxies`, otherwise every
 request appears to come from the proxy address (shared rate-limit buckets,
 login lockout per proxy IP, IP allowlists matching the proxy).

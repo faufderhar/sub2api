@@ -45,7 +45,9 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		return err
 	}
 	forwardedClientIPHeaders := []string{}
-	// 全新安装：只有配置/环境变量显式设为 true 时才写 true，否则写安全默认值 false。
+	// 注意：启动流程目前不调用 InitializeDefaultSettings，全新安装时这个开关不会写值行，
+	// 只由 LoadForwardedClientIPSettings 写迁移标记，生效值跟随配置/环境变量。
+	// 这里保留"只有配置/环境变量显式设为 true 时才写 true"的安全默认值，供调用方使用。
 	forwardedIPTrustDefault := false
 	if s != nil && s.cfg != nil {
 		forwardedClientIPHeaders = s.cfg.ForwardedClientIPSettings().Headers
