@@ -482,6 +482,23 @@ func omittedSettingKeys(sentFields map[string]json.RawMessage) service.OmittedSe
 	return omitted
 }
 
+// skipForwardedIPTrustWrite 决定本次保存是否跳过写入 api_key_acl_trust_forwarded_ip。
+//
+// 设置页是整表提交的：页面把 GET 拿到的当前生效值原样带回来。旧版本里这个生效值
+// 可能来自配置默认值（DB 里并没有这个 key），保存一次就会被固化成 DB 里的 true，
+// 之后 DB 值覆盖配置、永远不会自己消失（BD-1）。规则：
+//   - 字段缺失或值未变、且结果是 true：不写，DB 保持原样（缺失时继续跟随配置）；
+//   - 管理员真正把 false 改成 true：照常写入；
+//   - 结果是 false：照常写入。false 是安全方向，且保留现有的 fail-close 归一化
+//     （DB 里 true + 转发头配置损坏时，解析结果为 false，保存会把 DB 归一化成 false）。
+func skipForwardedIPTrustWrite(sent *bool, previous, final bool) bool {
+	if !final {
+		return false
+	}
+	changedToTrue := sent != nil && *sent && !previous
+	return !changedToTrue
+}
+
 func settingsAuditRequest(req UpdateSettingsRequest) UpdateSettingsRequest {
 	req.TencentCaptchaAppSecretKey = strings.TrimSpace(req.TencentCaptchaAppSecretKey)
 	req.TencentCaptchaCloudSecretID = strings.TrimSpace(req.TencentCaptchaCloudSecretID)
@@ -2100,6 +2117,12 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			PlatformQuotas:   platformQuotasValueOrDefault(req.AuthSourceDingTalkPlatformQuotas, previousAuthSourceDefaults.DingTalk.PlatformQuotas),
 		},
 		ForceEmailOnThirdPartySignup: boolValueOrDefault(req.ForceEmailOnThirdPartySignup, previousAuthSourceDefaults.ForceEmailOnThirdPartySignup),
+	}
+	if skipForwardedIPTrustWrite(req.APIKeyACLTrustForwardedIP, previousSettings.APIKeyACLTrustForwardedIP, settings.APIKeyACLTrustForwardedIP) {
+		if omitted == nil {
+			omitted = service.OmittedSettingKeys{}
+		}
+		omitted[service.SettingKeyAPIKeyACLTrustForwardedIP] = struct{}{}
 	}
 	if err := h.settingService.UpdateSettingsWithAuthSourceDefaultsOmitting(c.Request.Context(), settings, authSourceDefaults, omitted); err != nil {
 		response.ErrorFrom(c, err)

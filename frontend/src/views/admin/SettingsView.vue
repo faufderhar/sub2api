@@ -9853,7 +9853,7 @@ const form = reactive<SettingsForm>({
   aliyun_captcha_scene_id: "",
   aliyun_captcha_prefix: "",
   aliyun_captcha_region: "cn",
-  api_key_acl_trust_forwarded_ip: true,
+  api_key_acl_trust_forwarded_ip: false, // 安全默认值；真实值以 GET /admin/settings 为准
   forwarded_client_ip_headers: [],
   // LinuxDo Connect OAuth 登录
   linuxdo_connect_enabled: false,
