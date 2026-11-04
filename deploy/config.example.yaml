@@ -198,13 +198,15 @@ security:
   # Rotating source IPs bypasses the per-account lock, so keep IP rate limits on.
   # Unknown emails are counted and locked the same way, so the response never
   # reveals whether an account exists. Requires Redis; if Redis is unavailable
-  # login fails closed (503).
+  # login fails closed: the fail-close per-IP rate limit on the login route
+  # rejects first, so clients see HTTP 429 "Too many requests" (not 503).
   # 按「账号 + 客户端 IP」计数的密码登录失败锁定（账号 = 规范化后的登录邮箱，
   # IP = 解析出的客户端 IP）。同一 IP 在 window_seconds 内失败 max_failures 次后，
   # 该「账号 + IP」锁定 lockout_seconds 秒，接口返回 HTTP 429、错误码 LOGIN_LOCKED。
   # 攻击者换 IP 就能绕开单账号锁定，需要依靠 IP 限流兜底。
   # 不存在的邮箱同样计数和锁定，不暴露账号是否存在。依赖 Redis，Redis 不可用时
-  # 登录 fail-close（503）。
+  # 登录 fail-close：登录路由上 fail-close 的 IP 限流先拦截，客户端实际收到 HTTP 429
+  # "Too many requests"（不是 503）。
   # Environment / 环境变量: SECURITY_LOGIN_LOCKOUT_ENABLED / _MAX_FAILURES /
   #   _WINDOW_SECONDS / _LOCKOUT_SECONDS
   login_lockout:

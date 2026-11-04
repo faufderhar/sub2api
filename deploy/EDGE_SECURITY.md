@@ -131,8 +131,20 @@ password check, so concurrent requests can never run more than `max_failures`
 password checks per window; requests beyond the threshold are rejected without
 running bcrypt. Unknown emails are counted and locked the same way, so the
 response never reveals whether an account exists. A successful login clears the
-failure counter for that account + IP. State lives in Redis; when Redis
-cannot be reached the login fails closed with 503. Known trade-off: an attacker who knows a user's email can only lock that user
+failure counter for that account + IP. State lives in Redis.
+
+When Redis cannot be reached, password login still fails closed, but the
+client sees **HTTP 429** (`{"error":"rate limit exceeded","message":"Too many
+requests, please try again later"}`, with `Retry-After`), not 503: the per-IP
+rate limiter on `POST /api/v1/auth/login` (and on
+`/api/v1/auth/oauth/pending/bind-login`) runs first in fail-close mode and
+rejects the request before the lockout code is reached. The lockout's own
+503 (`SERVICE_UNAVAILABLE`) branch only applies to callers that bypass that
+route-level limiter. For monitoring, a burst of 429 responses on the login
+routes together with `[RateLimit] redis error ... mode=fail-close` in the logs
+means Redis is down, not that users are being rate limited; logins recover as
+soon as Redis is reachable again. Body difference: the lockout's own 429
+carries `reason: LOGIN_LOCKED`, the Redis-down 429 does not. Known trade-off: an attacker who knows a user's email can only lock that user
 out from the attacker's own IP, not from the user's IP; the flip side is that
 an attacker who rotates source IPs gets a fresh per-account budget on every IP,
 so per-account lockout alone does not stop distributed guessing. The per-IP
