@@ -35,6 +35,28 @@ describe('sanitizeHomeContent (L-1)', () => {
     expect(out).toContain('<iframe src="https://www.youtube.com/embed/x"')
   })
 
+  it('D-2：保留 iframe 的 sandbox、allow、referrerpolicy、loading', () => {
+    const out = sanitizeHomeContent(
+      '<iframe src="https://example.com/embed" sandbox="allow-scripts allow-same-origin" ' +
+      'allow="autoplay; fullscreen; picture-in-picture" referrerpolicy="strict-origin-when-cross-origin" loading="lazy"></iframe>'
+    )
+    const iframe = new DOMParser().parseFromString(out, 'text/html').querySelector('iframe')!
+    expect(iframe.getAttribute('src')).toBe('https://example.com/embed')
+    expect(iframe.getAttribute('sandbox')).toBe('allow-scripts allow-same-origin')
+    expect(iframe.getAttribute('allow')).toBe('autoplay; fullscreen; picture-in-picture')
+    expect(iframe.getAttribute('referrerpolicy')).toBe('strict-origin-when-cross-origin')
+    expect(iframe.getAttribute('loading')).toBe('lazy')
+  })
+
+  it('D-2：放开属性后危险协议和 srcdoc 仍被拦截', () => {
+    const out = sanitizeHomeContent(
+      '<iframe src="javascript:alert(1)" sandbox="allow-scripts"></iframe>' +
+      '<iframe srcdoc="<script>alert(2)</script>" allow="autoplay"></iframe>'
+    )
+    expect(out).not.toMatch(/javascript:/i)
+    expect(out).not.toMatch(/srcdoc/i)
+  })
+
   it('空内容返回空字符串', () => {
     expect(sanitizeHomeContent('')).toBe('')
   })

@@ -13,12 +13,14 @@ export function sanitizeSvg(svg: string): string {
  * - 与 CustomPageView 一致，允许 <iframe>（嵌入视频等），src 仍经过 DOMPurify 的 URL 校验，srcdoc 不放行。
  * - FORCE_BODY：自定义首页通常以 <style> 开头，不加这个选项时开头的 <style> 会被丢掉。
  * - 保留 <a target>，避免“新窗口打开”的链接行为发生变化。
+ * - 保留 iframe 的 sandbox、allow、referrerpolicy、loading（D-2）：管理员用 sandbox 收紧权限、
+ *   常见嵌入代码用 allow 开启自动播放/全屏等，剥掉反而会放宽限制或造成功能回归。
  */
 export function sanitizeHomeContent(html: string): string {
   if (!html) return ''
   return DOMPurify.sanitize(html, {
     FORCE_BODY: true,
     ADD_TAGS: ['iframe'],
-    ADD_ATTR: ['allowfullscreen', 'frameborder', 'target']
+    ADD_ATTR: ['allowfullscreen', 'frameborder', 'target', 'sandbox', 'allow', 'referrerpolicy', 'loading']
   })
 }
