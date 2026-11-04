@@ -9,6 +9,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 )
 
@@ -56,9 +57,11 @@ func loginLockoutClientIP(ctx context.Context) string {
 	return ""
 }
 
+// loginLockoutSubjectKey 的 IP 维度经过 ip.RateLimitKey 归一化：IPv4 不变，IPv4-mapped 还原成 IPv4，
+// IPv6 按 /64 合并（同一个 /64 里换地址共用一个计数），和登录接口的 IP 限流口径一致。
 func loginLockoutSubjectKey(email, clientIP string) string {
 	normalized := strings.ToLower(strings.TrimSpace(email))
-	sum := sha256.Sum256([]byte("account+ip\x00" + normalized + "\x00" + clientIP))
+	sum := sha256.Sum256([]byte("account+ip\x00" + normalized + "\x00" + ip.RateLimitKey(clientIP)))
 	return hex.EncodeToString(sum[:])
 }
 func (s *AuthService) loginLockoutSettings() (config.LoginLockoutConfig, bool) {

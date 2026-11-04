@@ -3,6 +3,7 @@
 package ip
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -466,4 +467,60 @@ func TestForwardedHeaderHelpers(t *testing.T) {
 	require.Equal(t, "4.4.4.4", singleValueForwardedHeader(h, "X-Real-IP"))
 	h.Add("X-Real-IP", "5.5.5.5")
 	require.Equal(t, "", singleValueForwardedHeader(h, "X-Real-IP"))
+}
+
+func TestRateLimitKey(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"203.0.113.9", "203.0.113.9"},
+		{" 203.0.113.9 ", "203.0.113.9"},
+		{"::ffff:203.0.113.9", "203.0.113.9"},   // IPv4-mapped 还原成 IPv4
+		{"::ffff:cb00:7109", "203.0.113.9"},     // 十六进制写法的 IPv4-mapped
+		{"[::ffff:203.0.113.9]", "203.0.113.9"}, // 带方括号
+		{"2001:db8:1:2:aaaa:bbbb:cccc:dddd", "2001:db8:1:2::/64"},
+		{"2001:DB8:1:2::1", "2001:db8:1:2::/64"},
+		{"[2001:db8:1:2::1]", "2001:db8:1:2::/64"},
+		{"fe80::1%eth0", "fe80::/64"}, // zone 被去掉
+		{"fe80::2%25en0", "fe80::/64"},
+		{"::1", "::/64"},
+		{"2001:db8:1:3::1", "2001:db8:1:3::/64"},
+		{"", ""},
+		{"  ", ""},
+		{"not-an-ip", "not-an-ip"},
+	}
+	for _, tc := range cases {
+		require.Equal(t, tc.want, RateLimitKey(tc.in), "input %q", tc.in)
+	}
+	require.Equal(t, "2001:db8::/48", RateLimitKeyWithPrefix("2001:db8:0:7::1", 48))
+	require.Equal(t, "2001:db8::1", RateLimitKeyWithPrefix("2001:db8::1", 128))
+	require.Equal(t, "2001:db8::1", RateLimitKeyWithPrefix("2001:db8::1%eth0", 0))
+	require.Equal(t, "203.0.113.9", RateLimitKeyWithPrefix("::ffff:203.0.113.9", 128))
+}
+
+func TestRateLimitKeySameSlash64ManyAddresses(t *testing.T) {
+	seen := map[string]struct{}{}
+	for i := 1; i <= 25; i++ {
+		seen[RateLimitKey(fmt.Sprintf("2001:db8:1:2:%x::%x", i*7, i))] = struct{}{}
+	}
+	require.Len(t, seen, 1, "25 个同 /64 地址应归一到一个键")
+	require.NotEqual(t, RateLimitKey("2001:db8:1:2::1"), RateLimitKey("2001:db8:1:3::1"))
+	require.NotEqual(t, RateLimitKey("203.0.113.1"), RateLimitKey("203.0.113.2"), "IPv4 仍按单个地址")
+}
+
+// RateLimitKey 只用于计数键，ClientIP 返回值保持完整 IPv6 地址（审计日志、IP 白名单用）。
+func TestClientIPKeepsFullIPv6Address(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	require.Empty(t, SetTrustedProxies([]string{"127.0.0.1/32"}))
+	t.Cleanup(func() { SetTrustedProxies(nil) })
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "127.0.0.1:1234"
+	req.Header.Set("X-Forwarded-For", "2001:db8:1:2:aaaa:bbbb:cccc:dddd")
+	c.Request = req
+	require.Equal(t, "2001:db8:1:2:aaaa:bbbb:cccc:dddd", ClientIP(c))
+
+	c2, _ := gin.CreateTestContext(httptest.NewRecorder())
+	req2 := httptest.NewRequest(http.MethodGet, "/", nil)
+	req2.RemoteAddr = "[2001:db8:9:9::5]:1234"
+	c2.Request = req2
+	require.Equal(t, "2001:db8:9:9::5", ClientIP(c2))
 }

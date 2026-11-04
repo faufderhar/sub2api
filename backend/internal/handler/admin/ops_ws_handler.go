@@ -315,7 +315,7 @@ func closeWS(conn *websocket.Conn, code int, reason string) {
 // QPSWSHandler handles realtime QPS push via WebSocket.
 // GET /api/v1/admin/ops/ws/qps
 func (h *OpsHandler) QPSWSHandler(c *gin.Context) {
-	clientIP := opsWSClientIP(c)
+	clientIP := opsWSLimitKey(c)
 
 	if h == nil || h.opsService == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "ops service not initialized"})
@@ -608,6 +608,12 @@ func requestPeerIP(r *http.Request) (netip.Addr, bool) {
 		return netip.Addr{}, false
 	}
 	return addr.Unmap(), true
+}
+
+// opsWSLimitKey 返回按 IP 限连接数用的键：ip.ClientIP 的结果经 ip.RateLimitKey 归一化，
+// IPv6 按 /64 合并（同一个 /64 里换地址共用连接数上限），IPv4 不变。
+func opsWSLimitKey(c *gin.Context) string {
+	return ip.RateLimitKey(opsWSClientIP(c))
 }
 
 // opsWSClientIP 返回 per-IP 连接数限制使用的客户端 IP（BD-4）。

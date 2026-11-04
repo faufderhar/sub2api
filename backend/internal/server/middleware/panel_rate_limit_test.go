@@ -3,6 +3,7 @@ package middleware
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -312,4 +313,30 @@ func TestIsPubliclyRoutableClientIP(t *testing.T) {
 	require.False(t, isPubliclyRoutableClientIP("0.0.0.0"))
 	require.False(t, isPubliclyRoutableClientIP(""))
 	require.False(t, isPubliclyRoutableClientIP("not-an-ip"))
+}
+
+// 公网 IP 限流的键经 ip.RateLimitKey 归一化：IPv6 同一个 /64 共用一个桶，不同 /64 独立，IPv4 不变。
+func TestPanelRateLimiterPublicIPAggregatesIPv6Slash64(t *testing.T) {
+	allower := &fakePanelAllower{}
+	p := &PanelRateLimiter{
+		limiter:        allower,
+		settingService: newPanelRateLimitTestService(t, `{"enabled":true,"user_rpm":0,"heavy_rpm":0,"exempt_admin":true,"public_ip_rpm":20}`),
+	}
+	router := newPanelTestRouter(p.PublicIP(), nil)
+	for i := 1; i <= 25; i++ {
+		code := performPanelRequest(router, fmt.Sprintf("[2001:db8:1:2:%x::%x]:1000", i, i)).Code
+		if i <= 20 {
+			require.Equal(t, http.StatusOK, code, "request %d", i)
+		} else {
+			require.Equal(t, http.StatusTooManyRequests, code, "request %d", i)
+		}
+	}
+	require.Equal(t, http.StatusOK, performPanelRequest(router, "[2001:db8:1:3::1]:1000").Code)
+	require.Equal(t, http.StatusOK, performPanelRequest(router, "203.0.113.9:1000").Code)
+
+	allower.mu.Lock()
+	defer allower.mu.Unlock()
+	require.Contains(t, allower.counts, "panel:public:ip:2001:db8:1:2::/64")
+	require.Contains(t, allower.counts, "panel:public:ip:2001:db8:1:3::/64")
+	require.Contains(t, allower.counts, "panel:public:ip:203.0.113.9")
 }

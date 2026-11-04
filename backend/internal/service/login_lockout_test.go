@@ -4,7 +4,10 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -364,4 +367,61 @@ func TestLoginLockoutConcurrentAttemptsCheckPasswordAtMostThreshold(t *testing.T
 			require.Equal(t, max, checks.Load(), "locked attempts never reach bcrypt")
 		})
 	}
+}
+
+// IPv6 /64：锁定的 IP 维度按 /64 合并。同一个 /64 里换 25 个地址也会在第 10 次失败时锁定，
+// 不同 /64 不受影响；IPv4 仍按单个地址；IPv4-mapped 和 IPv4 共用计数。
+func TestLoginLockoutAggregatesIPv6Slash64(t *testing.T) {
+	cache := newMemLoginAttemptCache()
+	svc := newLockoutAuthService(t, cache, defaultLockout())
+
+	var errs []error
+	for i := 1; i <= 25; i++ {
+		_, _, err := svc.Login(ctxFromIP(fmt.Sprintf("2001:db8:1:2:%x::%x", i*3, i)), "alice@example.com", "wrong")
+		errs = append(errs, err)
+	}
+	for i, err := range errs {
+		if i < 9 {
+			require.ErrorIs(t, err, ErrInvalidCredentials, "attempt %d", i+1)
+		} else {
+			require.ErrorIs(t, err, ErrLoginLocked, "attempt %d", i+1)
+		}
+	}
+	// 同一个 /64 里的新地址、正确密码：仍被锁
+	_, _, err := svc.Login(ctxFromIP("2001:db8:1:2:dead:beef::1"), "alice@example.com", "correct-password")
+	require.ErrorIs(t, err, ErrLoginLocked)
+	_, err = svc.ValidatePasswordCredentials(ctxFromIP("2001:db8:1:2::99"), "alice@example.com", "correct-password")
+	require.ErrorIs(t, err, ErrLoginLocked)
+	// 不同 /64 不受影响
+	_, user, err := svc.Login(ctxFromIP("2001:db8:1:3::1"), "alice@example.com", "correct-password")
+	require.NoError(t, err)
+	require.Equal(t, int64(42), user.ID)
+
+	// IPv4 行为不变：每个地址各自计数，换 25 个地址都只是密码错误
+	for i := 1; i <= 25; i++ {
+		_, _, err := svc.Login(ctxFromIP(fmt.Sprintf("198.51.100.%d", i)), "bob@example.com", "wrong")
+		require.ErrorIs(t, err, ErrInvalidCredentials, "ipv4 attempt %d", i)
+	}
+
+	// IPv4-mapped 与 IPv4 共用一个计数
+	for i := 1; i <= 5; i++ {
+		_, _, err := svc.Login(ctxFromIP("203.0.113.20"), "carol@example.com", "wrong")
+		require.ErrorIs(t, err, ErrInvalidCredentials)
+		_, _, err = svc.Login(ctxFromIP("::ffff:203.0.113.20"), "carol@example.com", "wrong")
+		if i < 5 {
+			require.ErrorIs(t, err, ErrInvalidCredentials)
+		} else {
+			require.ErrorIs(t, err, ErrLoginLocked)
+		}
+	}
+}
+
+func TestLoginLockoutSubjectKeyIPv6Normalization(t *testing.T) {
+	require.Equal(t, loginLockoutSubjectKey("a@b.c", "2001:db8:1:2::1"), loginLockoutSubjectKey("a@b.c", "2001:db8:1:2:ffff:ffff:ffff:ffff"))
+	require.Equal(t, loginLockoutSubjectKey("a@b.c", "fe80::1%eth0"), loginLockoutSubjectKey("a@b.c", "fe80::2"))
+	require.Equal(t, loginLockoutSubjectKey("a@b.c", "::ffff:1.2.3.4"), loginLockoutSubjectKey("a@b.c", "1.2.3.4"))
+	require.NotEqual(t, loginLockoutSubjectKey("a@b.c", "2001:db8:1:2::1"), loginLockoutSubjectKey("a@b.c", "2001:db8:1:3::1"))
+	// IPv4 键与改动前一致（sha256 输入仍是原始 IPv4 字符串）
+	sum := sha256.Sum256([]byte("account+ip\x00a@b.c\x001.2.3.4"))
+	require.Equal(t, hex.EncodeToString(sum[:]), loginLockoutSubjectKey("A@b.c", "1.2.3.4"))
 }

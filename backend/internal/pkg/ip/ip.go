@@ -521,3 +521,49 @@ func ValidateIPPatterns(patterns []string) []string {
 	}
 	return invalid
 }
+
+// DefaultRateLimitIPv6PrefixBits 是限流、登录锁定等「按 IP 计数」场景合并 IPv6 地址时使用的前缀长度。
+// 运营商和云厂商通常给一个用户（一台机器）分配整个 /64，按单个地址计数时，换地址就能绕过。
+const DefaultRateLimitIPv6PrefixBits = 64
+
+// RateLimitKey 把 ClientIP 的结果归一化成「按 IP 计数」用的键：
+//   - IPv4 原样返回（规范化书写）；
+//   - IPv4-mapped IPv6（::ffff:a.b.c.d）还原成 IPv4，和直接用 IPv4 连接的同一客户端共用计数；
+//   - IPv6 去掉 zone（fe80::1%eth0），按 /64 合并，返回网段写法，例如 "2001:db8:1:2::/64"；
+//   - 无法解析的值（包括空串）去掉首尾空白后原样返回。
+//
+// 只用于限流和锁定的计数键。审计日志、IP 白名单、会话绑定等仍使用 ClientIP 返回的完整地址。
+func RateLimitKey(clientIP string) string {
+	return RateLimitKeyWithPrefix(clientIP, DefaultRateLimitIPv6PrefixBits)
+}
+
+// RateLimitKeyWithPrefix 同 RateLimitKey，但可以指定 IPv6 合并前缀；bits 不在 1..127 时按单个地址计数。
+func RateLimitKeyWithPrefix(clientIP string, ipv6PrefixBits int) string {
+	raw := strings.TrimSpace(clientIP)
+	if raw == "" {
+		return ""
+	}
+	host := raw
+	if strings.HasPrefix(host, "[") && strings.HasSuffix(host, "]") {
+		host = host[1 : len(host)-1]
+	}
+	addr, err := netip.ParseAddr(host)
+	if err != nil {
+		return raw
+	}
+	addr = addr.WithZone("")
+	if addr.Is4In6() {
+		addr = addr.Unmap()
+	}
+	if addr.Is4() {
+		return addr.String()
+	}
+	if ipv6PrefixBits <= 0 || ipv6PrefixBits >= 128 {
+		return addr.String()
+	}
+	prefix, err := addr.Prefix(ipv6PrefixBits)
+	if err != nil {
+		return addr.String()
+	}
+	return prefix.String()
+}

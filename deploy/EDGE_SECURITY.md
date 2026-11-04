@@ -119,7 +119,9 @@ Password logins (`POST /api/v1/auth/login` and the password check of the
 pending OAuth account-adoption flow) share one failure counter per
 **account + client IP** pair. The account is the normalized (trimmed,
 lower-cased) email, the client IP is the value `ip.ClientIP` resolves (see
-"Trusted client IPs" above), and the pair is SHA-256 hashed into the Redis key
+"Trusted client IPs" above) normalized by `ip.RateLimitKey` (IPv4 unchanged,
+IPv4-mapped IPv6 `::ffff:a.b.c.d` counted as the IPv4 address, IPv6 zone
+dropped and **grouped by /64**), and the pair is SHA-256 hashed into the Redis key
 (`login_lockout:v2:{hash}:fail|lock`; the older account-only keys are no longer
 read or written and expire on their own):
 
@@ -159,6 +161,16 @@ an attacker who rotates source IPs gets a fresh per-account budget on every IP,
 so per-account lockout alone does not stop distributed guessing. The per-IP
 rate limits (built-in auth rate limit and the edge limits below) are the
 backstop and must stay enabled.
+
+**IPv6 /64 grouping.** Every IP-keyed counter uses `ip.RateLimitKey`: the
+lockout's IP dimension, the built-in per-IP rate limits on all auth/OAuth/MCP/
+payment-lookup routes, the panel public-IP rate limit, the in-process
+invalid-credential abuse limiter (`api_key_auth_cache.invalid_abuse`) and the ops WebSocket
+per-IP connection cap. IPv6 clients are counted per /64, because ISPs and
+clouds usually hand a whole /64 to one subscriber or VM, so rotating addresses
+inside it no longer resets the budget. Several users behind the same /64 share
+one counter. Audit logs, access logs, session binding and API-key IP
+allow/deny lists still see the full address returned by `ip.ClientIP`.
 
 ## Nginx baseline
 

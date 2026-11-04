@@ -196,7 +196,8 @@ security:
   # false once, unless this key or the env var explicitly sets true.
   trust_forwarded_ip_for_api_key_acl: false
   # Password-login lockout counted per account + client IP (account = normalized
-  # login email, IP = the resolved client IP, see server.trusted_proxies).
+  # login email, IP = the resolved client IP, see server.trusted_proxies; IPv6
+  # is grouped by /64, IPv4-mapped IPv6 counts as the IPv4 address).
   # After max_failures failed logins within window_seconds from the same IP, that
   # account + IP pair is locked for lockout_seconds; HTTP 429, code LOGIN_LOCKED.
   # Rotating source IPs bypasses the per-account lock, so keep IP rate limits on.
@@ -205,7 +206,7 @@ security:
   # login fails closed: the fail-close per-IP rate limit on the login route
   # rejects first, so clients see HTTP 429 "Too many requests" (not 503).
   # 按「账号 + 客户端 IP」计数的密码登录失败锁定（账号 = 规范化后的登录邮箱，
-  # IP = 解析出的客户端 IP）。同一 IP 在 window_seconds 内失败 max_failures 次后，
+  # IP = 解析出的客户端 IP；IPv6 按 /64 合并，::ffff:a.b.c.d 按 IPv4 计）。同一 IP 在 window_seconds 内失败 max_failures 次后，
   # 该「账号 + IP」锁定 lockout_seconds 秒，接口返回 HTTP 429、错误码 LOGIN_LOCKED。
   # 攻击者换 IP 就能绕开单账号锁定，需要依靠 IP 限流兜底。
   # 不存在的邮箱同样计数和锁定，不暴露账号是否存在。依赖 Redis，Redis 不可用时

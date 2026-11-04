@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"net/netip"
 	"strconv"
 	"time"
 
@@ -26,7 +25,9 @@ const (
 // RateLimitOptions 限流可选配置
 type RateLimitOptions struct {
 	FailureMode RateLimitFailureMode
-	// IPv6PrefixBits 按网段（如 64）合并 IPv6 客户端计数，避免轮换同一分配内的地址绕过限流；0 表示按单个地址计数。
+	// IPv6PrefixBits 合并 IPv6 客户端计数使用的前缀长度。0 表示默认值 /64（ip.DefaultRateLimitIPv6PrefixBits），
+	// 避免轮换同一分配内的地址绕过限流；1..127 为自定义前缀；>=128 表示按单个地址计数。
+	// IPv4 和 IPv4-mapped IPv6 不受影响，统一按 IPv4 地址计数。
 	IPv6PrefixBits int
 }
 
@@ -119,20 +120,13 @@ func clientIPForRateLimit(c *gin.Context) string {
 	return ippkg.ClientIP(c)
 }
 
-// rateLimitClientKey 把 IPv6 地址归并到指定前缀的网段；IPv4 与无法解析的值保持原样。
+// rateLimitClientKey 返回限流计数用的客户端键，统一走 ip.RateLimitKey：
+// IPv6 默认按 /64 合并，IPv4 / IPv4-mapped 按 IPv4 地址计数。
 func rateLimitClientKey(ip string, ipv6PrefixBits int) string {
-	if ipv6PrefixBits <= 0 || ipv6PrefixBits >= 128 {
-		return ip
+	if ipv6PrefixBits == 0 {
+		return ippkg.RateLimitKey(ip)
 	}
-	addr, err := netip.ParseAddr(ip)
-	if err != nil || !addr.Is6() || addr.Is4In6() {
-		return ip
-	}
-	prefix, err := addr.WithZone("").Prefix(ipv6PrefixBits)
-	if err != nil {
-		return ip
-	}
-	return prefix.String()
+	return ippkg.RateLimitKeyWithPrefix(ip, ipv6PrefixBits)
 }
 
 // Limit 返回速率限制中间件
