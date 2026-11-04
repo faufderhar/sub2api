@@ -471,15 +471,16 @@ func (s *AuthService) ValidatePasswordCredentials(ctx context.Context, email, pa
 		return nil, ErrServiceUnavailable
 	}
 
-	// 与密码登录共享按账号的失败计数和锁定，避免通过该入口绕过锁定爆破密码。
-	if err := s.checkLoginLockout(ctx, email); err != nil {
+	// 与密码登录共享按「账号 + IP」的失败计数和锁定（同样先占用尝试再校验），避免通过该入口绕过锁定爆破密码。
+	lockoutSubjects, err := s.reserveLoginAttempt(ctx, email)
+	if err != nil {
 		return nil, err
 	}
 
 	user, err := s.userRepo.GetByEmail(ctx, strings.TrimSpace(strings.ToLower(email)))
 	if err != nil {
 		if errors.Is(err, ErrUserNotFound) {
-			return nil, s.recordLoginFailure(ctx, email, ErrInvalidCredentials)
+			return nil, s.recordLoginFailure(ctx, lockoutSubjects, ErrInvalidCredentials)
 		}
 		return nil, ErrServiceUnavailable
 	}
@@ -487,9 +488,9 @@ func (s *AuthService) ValidatePasswordCredentials(ctx context.Context, email, pa
 		return nil, ErrUserNotActive
 	}
 	if !s.CheckPassword(password, user.PasswordHash) {
-		return nil, s.recordLoginFailure(ctx, email, ErrInvalidCredentials)
+		return nil, s.recordLoginFailure(ctx, lockoutSubjects, ErrInvalidCredentials)
 	}
-	s.resetLoginFailures(ctx, email)
+	s.resetLoginFailures(ctx, lockoutSubjects)
 	return user, nil
 }
 

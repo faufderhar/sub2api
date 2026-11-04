@@ -107,8 +107,12 @@ server:
 ## Login lockout
 
 Password logins (`POST /api/v1/auth/login` and the password check of the
-pending OAuth account-adoption flow) are limited per account, keyed by the
-normalized (trimmed, lower-cased, SHA-256 hashed) email:
+pending OAuth account-adoption flow) share one failure counter per
+**account + client IP** pair. The account is the normalized (trimmed,
+lower-cased) email, the client IP is the value `ip.ClientIP` resolves (see
+"Trusted client IPs" above), and the pair is SHA-256 hashed into the Redis key
+(`login_lockout:v2:{hash}:fail|lock`; the older account-only keys are no longer
+read or written and expire on their own):
 
 ```yaml
 security:
@@ -119,13 +123,21 @@ security:
     lockout_seconds: 900 # SECURITY_LOGIN_LOCKOUT_LOCKOUT_SECONDS
 ```
 
-After `max_failures` failures within `window_seconds`, the account is locked
-for `lockout_seconds`; during the lock even the correct password is rejected
-with HTTP 429 and `reason: LOGIN_LOCKED`. Unknown emails are counted and locked
-the same way, so the response never reveals whether an account exists. A
-successful login clears the failure counter. State lives in Redis; when Redis
-cannot be reached the login fails closed with 503. Because anyone who knows an
-email can trigger the lock, keep the per-IP edge rate limits below as well.
+After `max_failures` failures within `window_seconds` from the same client IP,
+that account + IP pair is locked for `lockout_seconds`; during the lock even the
+correct password is rejected with HTTP 429 and `reason: LOGIN_LOCKED`. Every
+attempt first reserves a slot atomically in Redis and only then runs the
+password check, so concurrent requests can never run more than `max_failures`
+password checks per window; requests beyond the threshold are rejected without
+running bcrypt. Unknown emails are counted and locked the same way, so the
+response never reveals whether an account exists. A successful login clears the
+failure counter for that account + IP. State lives in Redis; when Redis
+cannot be reached the login fails closed with 503. Known trade-off: an attacker who knows a user's email can only lock that user
+out from the attacker's own IP, not from the user's IP; the flip side is that
+an attacker who rotates source IPs gets a fresh per-account budget on every IP,
+so per-account lockout alone does not stop distributed guessing. The per-IP
+rate limits (built-in auth rate limit and the edge limits below) are the
+backstop and must stay enabled.
 
 ## Nginx baseline
 

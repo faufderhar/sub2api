@@ -796,13 +796,13 @@ type SecurityConfig struct {
 	// When disabled, server.trusted_proxies is authoritative for all client-IP consumers.
 	TrustForwardedIPForAPIKeyACL bool     `mapstructure:"trust_forwarded_ip_for_api_key_acl"`
 	ForwardedClientIPHeaders     []string `mapstructure:"forwarded_client_ip_headers" json:"forwarded_client_ip_headers" yaml:"forwarded_client_ip_headers"`
-	// LoginLockout 按账号（登录邮箱）的密码登录失败锁定。
+	// LoginLockout 按「账号（登录邮箱）+ 客户端 IP」计数的密码登录失败锁定。
 	LoginLockout                  LoginLockoutConfig                         `mapstructure:"login_lockout"`
 	forwardedClientIPSettingsLive *atomic.Pointer[ForwardedClientIPSettings] `mapstructure:"-" json:"-" yaml:"-"`
 }
 
-// LoginLockoutConfig 按账号的登录失败锁定配置。
-// 在 WindowSeconds 内累计失败 MaxFailures 次后，该账号锁定 LockoutSeconds 秒；
+// LoginLockoutConfig 按「账号 + 客户端 IP」的登录失败锁定配置。
+// 同一 IP 在 WindowSeconds 内累计失败 MaxFailures 次后，该「账号 + IP」锁定 LockoutSeconds 秒；
 // 锁定期间即使密码正确也拒绝登录，到期自动解锁。账号是否存在不影响计数和返回结果。
 type LoginLockoutConfig struct {
 	Enabled        bool `mapstructure:"enabled"`
@@ -2207,7 +2207,7 @@ func setDefaults() {
 	// H-1：默认不信任客户端提供的转发头。部署在 Nginx/CDN 后面时请配置
 	// server.trusted_proxies（SERVER_TRUSTED_PROXIES），而不是打开此兼容开关。
 	viper.SetDefault("security.trust_forwarded_ip_for_api_key_acl", false)
-	// H-1：按账号的登录失败锁定（默认 15 分钟内失败 10 次，锁定 15 分钟）
+	// H-1：按「账号 + IP」的登录失败锁定（默认 15 分钟内失败 10 次，锁定 15 分钟）
 	viper.SetDefault("security.login_lockout.enabled", true)
 	viper.SetDefault("security.login_lockout.max_failures", DefaultLoginLockoutMaxFailures)
 	viper.SetDefault("security.login_lockout.window_seconds", DefaultLoginLockoutWindowSeconds)

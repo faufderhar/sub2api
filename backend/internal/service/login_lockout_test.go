@@ -5,7 +5,9 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -34,28 +36,42 @@ func newMemLoginAttemptCache() *memLoginAttemptCache {
 	}
 }
 
-func (m *memLoginAttemptCache) IsLocked(_ context.Context, key string) (bool, time.Duration, error) {
+// ReserveAttempt 与 repository.reserveLoginAttemptScript 语义一致。
+func (m *memLoginAttemptCache) ReserveAttempt(_ context.Context, key string, max int, window, lockout time.Duration) (bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.lockErr != nil {
-		return false, 0, m.lockErr
+		return false, m.lockErr
 	}
-	until, ok := m.lockedTil[key]
-	if !ok || !m.now().Before(until) {
-		return false, 0, nil
-	}
-	return true, until.Sub(m.now()), nil
-}
-
-func (m *memLoginAttemptCache) RecordFailure(_ context.Context, key string, max int, window, lockout time.Duration) (bool, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
 	now := m.now()
+	if until, ok := m.lockedTil[key]; ok && now.Before(until) {
+		return false, nil
+	}
 	if end, ok := m.windowEnd[key]; !ok || !now.Before(end) {
 		m.failures[key] = 0
 		m.windowEnd[key] = now.Add(window)
 	}
 	m.failures[key]++
+	if m.failures[key] > max {
+		m.lockedTil[key] = now.Add(lockout)
+		delete(m.failures, key)
+		delete(m.windowEnd, key)
+		return false, nil
+	}
+	return true, nil
+}
+
+// RecordFailure 与 repository.recordLoginFailureScript 语义一致。
+func (m *memLoginAttemptCache) RecordFailure(_ context.Context, key string, max int, lockout time.Duration) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	now := m.now()
+	if until, ok := m.lockedTil[key]; ok && now.Before(until) {
+		return true, nil
+	}
+	if end, ok := m.windowEnd[key]; !ok || !now.Before(end) {
+		return false, nil
+	}
 	if m.failures[key] >= max {
 		m.lockedTil[key] = now.Add(lockout)
 		delete(m.failures, key)
@@ -71,6 +87,25 @@ func (m *memLoginAttemptCache) Reset(_ context.Context, key string) error {
 	delete(m.failures, key)
 	delete(m.windowEnd, key)
 	return nil
+}
+
+// ctxFromIP 模拟 SessionBindingContext 中间件：把 ip.ClientIP 的结果注入 request context。
+func ctxFromIP(ip string) context.Context {
+	return WithSessionBinding(context.Background(), &SessionBinding{IP: ip, UserAgent: "test"})
+}
+
+// concurrentUserRepo 只读地返回固定用户，可安全并发调用。
+type concurrentUserRepo struct {
+	userRepoStub
+	fixed *User
+}
+
+func (r *concurrentUserRepo) GetByEmail(_ context.Context, email string) (*User, error) {
+	if strings.EqualFold(strings.TrimSpace(email), r.fixed.Email) {
+		u := *r.fixed
+		return &u, nil
+	}
+	return nil, ErrUserNotFound
 }
 
 func newLockoutAuthService(t *testing.T, cache LoginAttemptCache, lockout config.LoginLockoutConfig) *AuthService {
@@ -102,7 +137,7 @@ func defaultLockout() config.LoginLockoutConfig {
 func TestLoginLockoutLocksAfterMaxFailures(t *testing.T) {
 	cache := newMemLoginAttemptCache()
 	svc := newLockoutAuthService(t, cache, defaultLockout())
-	ctx := context.Background()
+	ctx := ctxFromIP("203.0.113.10")
 
 	for i := 1; i < 10; i++ {
 		_, _, err := svc.Login(ctx, "alice@example.com", "wrong")
@@ -128,7 +163,7 @@ func TestLoginLockoutLocksAfterMaxFailures(t *testing.T) {
 func TestLoginLockoutDoesNotRevealAccountExistence(t *testing.T) {
 	cache := newMemLoginAttemptCache()
 	svc := newLockoutAuthService(t, cache, defaultLockout())
-	ctx := context.Background()
+	ctx := ctxFromIP("203.0.113.10")
 
 	var existingErr, missingErr error
 	for i := 0; i < 10; i++ {
@@ -148,7 +183,7 @@ func TestLoginLockoutDoesNotRevealAccountExistence(t *testing.T) {
 func TestLoginLockoutResetsOnSuccess(t *testing.T) {
 	cache := newMemLoginAttemptCache()
 	svc := newLockoutAuthService(t, cache, defaultLockout())
-	ctx := context.Background()
+	ctx := ctxFromIP("203.0.113.10")
 
 	for i := 0; i < 9; i++ {
 		_, _, _ = svc.Login(ctx, "alice@example.com", "wrong")
@@ -165,7 +200,7 @@ func TestLoginLockoutResetsOnSuccess(t *testing.T) {
 func TestLoginLockoutWindowExpires(t *testing.T) {
 	cache := newMemLoginAttemptCache()
 	svc := newLockoutAuthService(t, cache, defaultLockout())
-	ctx := context.Background()
+	ctx := ctxFromIP("203.0.113.10")
 	base := time.Now()
 	cache.now = func() time.Time { return base }
 
@@ -183,7 +218,7 @@ func TestLoginLockoutConfigurable(t *testing.T) {
 	svc := newLockoutAuthService(t, cache, config.LoginLockoutConfig{
 		Enabled: true, MaxFailures: 3, WindowSeconds: 60, LockoutSeconds: 30,
 	})
-	ctx := context.Background()
+	ctx := ctxFromIP("203.0.113.10")
 	_, _, _ = svc.Login(ctx, "alice@example.com", "wrong")
 	_, _, _ = svc.Login(ctx, "alice@example.com", "wrong")
 	_, _, err := svc.Login(ctx, "alice@example.com", "wrong")
@@ -193,7 +228,7 @@ func TestLoginLockoutConfigurable(t *testing.T) {
 func TestLoginLockoutDisabled(t *testing.T) {
 	cache := newMemLoginAttemptCache()
 	svc := newLockoutAuthService(t, cache, config.LoginLockoutConfig{Enabled: false})
-	ctx := context.Background()
+	ctx := ctxFromIP("203.0.113.10")
 	for i := 0; i < 20; i++ {
 		_, _, err := svc.Login(ctx, "alice@example.com", "wrong")
 		require.ErrorIs(t, err, ErrInvalidCredentials)
@@ -206,7 +241,7 @@ func TestLoginLockoutStoreErrorFailsClosed(t *testing.T) {
 	cache := newMemLoginAttemptCache()
 	cache.lockErr = errors.New("redis down")
 	svc := newLockoutAuthService(t, cache, defaultLockout())
-	_, _, err := svc.Login(context.Background(), "alice@example.com", "correct-password")
+	_, _, err := svc.Login(ctxFromIP("203.0.113.10"), "alice@example.com", "correct-password")
 	require.ErrorIs(t, err, ErrServiceUnavailable)
 }
 
@@ -215,11 +250,118 @@ func TestValidatePasswordCredentialsSharesLockout(t *testing.T) {
 	svc := newLockoutAuthService(t, cache, config.LoginLockoutConfig{
 		Enabled: true, MaxFailures: 3, WindowSeconds: 60, LockoutSeconds: 60,
 	})
-	ctx := context.Background()
+	ctx := ctxFromIP("203.0.113.10")
 	_, _, _ = svc.Login(ctx, "alice@example.com", "wrong")
 	_, _ = svc.ValidatePasswordCredentials(ctx, "alice@example.com", "wrong")
 	_, err := svc.ValidatePasswordCredentials(ctx, "alice@example.com", "wrong")
 	require.ErrorIs(t, err, ErrLoginLocked)
 	_, _, err = svc.Login(ctx, "alice@example.com", "correct-password")
 	require.ErrorIs(t, err, ErrLoginLocked)
+}
+
+func TestLoginLockoutIsPerAccountAndIP(t *testing.T) {
+	cache := newMemLoginAttemptCache()
+	svc := newLockoutAuthService(t, cache, defaultLockout())
+	attacker := ctxFromIP("198.51.100.7")
+	victim := ctxFromIP("203.0.113.10")
+
+	// 同一账号、同一 IP 连续失败 10 次被锁
+	for i := 1; i < 10; i++ {
+		_, _, err := svc.Login(attacker, "alice@example.com", "wrong")
+		require.ErrorIs(t, err, ErrInvalidCredentials, "attempt %d", i)
+	}
+	_, _, err := svc.Login(attacker, "alice@example.com", "wrong")
+	require.ErrorIs(t, err, ErrLoginLocked)
+	_, _, err = svc.Login(attacker, "alice@example.com", "correct-password")
+	require.ErrorIs(t, err, ErrLoginLocked)
+
+	// 换一个 IP 不受影响：账号本人仍可登录
+	_, user, err := svc.Login(victim, "alice@example.com", "correct-password")
+	require.NoError(t, err)
+	require.Equal(t, int64(42), user.ID)
+
+	// 同一 IP 的其他账号也不受影响（计数对象是 账号+IP）
+	_, _, err = svc.Login(attacker, "bob@example.com", "wrong")
+	require.ErrorIs(t, err, ErrInvalidCredentials)
+
+	// pending OAuth 入口共用同一个 账号+IP 计数
+	_, err = svc.ValidatePasswordCredentials(attacker, "alice@example.com", "correct-password")
+	require.ErrorIs(t, err, ErrLoginLocked)
+	_, err = svc.ValidatePasswordCredentials(victim, "alice@example.com", "correct-password")
+	require.NoError(t, err)
+}
+
+func TestLoginLockoutSubjectKeyNormalizesAndSeparatesIP(t *testing.T) {
+	require.Equal(t, loginLockoutSubjectKey("Alice@Example.com ", "1.2.3.4"), loginLockoutSubjectKey("alice@example.com", "1.2.3.4"))
+	require.NotEqual(t, loginLockoutSubjectKey("alice@example.com", "1.2.3.4"), loginLockoutSubjectKey("alice@example.com", "1.2.3.5"))
+	require.NotContains(t, loginLockoutSubjectKey("alice@example.com", "1.2.3.4"), "alice")
+	require.Equal(t, []string{loginLockoutSubjectKey("a@b.c", "9.9.9.9")}, loginLockoutSubjects(ctxFromIP("9.9.9.9"), "a@b.c"))
+}
+
+// TestLoginLockoutConcurrentAttemptsCheckPasswordAtMostThreshold 证明 BD-3：
+// 并发发起远多于阈值的错误密码请求时，真正执行的密码校验次数正好等于阈值，其余请求在
+// 校验之前就被拒绝（429），最终账号+IP 处于锁定状态。
+func TestLoginLockoutConcurrentAttemptsCheckPasswordAtMostThreshold(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		login func(svc *AuthService, ctx context.Context) error
+	}{
+		{"Login", func(svc *AuthService, ctx context.Context) error {
+			_, _, err := svc.Login(ctx, "alice@example.com", "wrong")
+			return err
+		}},
+		{"ValidatePasswordCredentials", func(svc *AuthService, ctx context.Context) error {
+			_, err := svc.ValidatePasswordCredentials(ctx, "alice@example.com", "wrong")
+			return err
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cache := newMemLoginAttemptCache()
+			svc := newLockoutAuthService(t, cache, defaultLockout())
+			hash, err := bcrypt.GenerateFromPassword([]byte("correct-password"), bcrypt.MinCost)
+			require.NoError(t, err)
+			svc.userRepo = &concurrentUserRepo{fixed: &User{
+				ID: 42, Email: "alice@example.com", PasswordHash: string(hash), Role: RoleUser, Status: StatusActive,
+			}}
+			var checks atomic.Int32
+			svc.passwordComparer = func(h, p []byte) error {
+				checks.Add(1)
+				time.Sleep(2 * time.Millisecond) // 拉长校验窗口，放大竞态
+				return bcrypt.CompareHashAndPassword(h, p)
+			}
+			ctx := ctxFromIP("198.51.100.7")
+
+			const workers = 60
+			var wg sync.WaitGroup
+			var invalid, locked atomic.Int32
+			start := make(chan struct{})
+			for i := 0; i < workers; i++ {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					<-start
+					err := tc.login(svc, ctx)
+					switch {
+					case errors.Is(err, ErrInvalidCredentials):
+						invalid.Add(1)
+					case errors.Is(err, ErrLoginLocked):
+						locked.Add(1)
+					default:
+						t.Errorf("unexpected error: %v", err)
+					}
+				}()
+			}
+			close(start)
+			wg.Wait()
+
+			max := int32(config.DefaultLoginLockoutMaxFailures)
+			require.Equal(t, max, checks.Load(), "password checks must equal the threshold exactly")
+			require.LessOrEqual(t, invalid.Load(), max-1)
+			require.Equal(t, int32(workers), invalid.Load()+locked.Load())
+			// 之后即使密码正确也被锁
+			_, _, err = svc.Login(ctx, "alice@example.com", "correct-password")
+			require.ErrorIs(t, err, ErrLoginLocked)
+			require.Equal(t, max, checks.Load(), "locked attempts never reach bcrypt")
+		})
+	}
 }

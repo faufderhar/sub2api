@@ -88,6 +88,8 @@ type AuthService struct {
 	userPlatformQuotaRepo UserPlatformQuotaRepository
 	mcpGrantRevoker       MCPGrantRevoker
 	loginAttemptCache     LoginAttemptCache
+	// passwordComparer 仅供测试注入（统计/观察 bcrypt 调用）；nil 时使用 bcrypt.CompareHashAndPassword。
+	passwordComparer func(hashedPassword, password []byte) error
 }
 
 type CaptchaProof struct {
@@ -544,8 +546,10 @@ func (s *AuthService) IsEmailVerifyEnabled(ctx context.Context) bool {
 
 // Login 用户登录，返回JWT token
 func (s *AuthService) Login(ctx context.Context, email, password string) (string, *User, error) {
-	// 按账号的失败锁定：锁定期间直接拒绝（账号不存在时同样计数/锁定，不暴露存在性）
-	if err := s.checkLoginLockout(ctx, email); err != nil {
+	// 按「账号 + IP」的失败锁定：先原子地占用一次尝试，锁定/超限时直接拒绝、不校验密码
+	// （账号不存在时同样计数/锁定，不暴露存在性）。
+	lockoutSubjects, err := s.reserveLoginAttempt(ctx, email)
+	if err != nil {
 		return "", nil, err
 	}
 
@@ -553,7 +557,7 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (string
 	user, err := s.userRepo.GetByEmail(ctx, email)
 	if err != nil {
 		if errors.Is(err, ErrUserNotFound) {
-			return "", nil, s.recordLoginFailure(ctx, email, ErrInvalidCredentials)
+			return "", nil, s.recordLoginFailure(ctx, lockoutSubjects, ErrInvalidCredentials)
 		}
 		// 记录数据库错误但不暴露给用户
 		logger.LegacyPrintf("service.auth", "[Auth] Database error during login: %v", err)
@@ -562,9 +566,9 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (string
 
 	// 验证密码
 	if !s.CheckPassword(password, user.PasswordHash) {
-		return "", nil, s.recordLoginFailure(ctx, email, ErrInvalidCredentials)
+		return "", nil, s.recordLoginFailure(ctx, lockoutSubjects, ErrInvalidCredentials)
 	}
-	s.resetLoginFailures(ctx, email)
+	s.resetLoginFailures(ctx, lockoutSubjects)
 
 	// 检查用户状态
 	if !user.IsActive() {
@@ -1487,7 +1491,11 @@ func (s *AuthService) HashPassword(password string) (string, error) {
 
 // CheckPassword 验证密码是否匹配
 func (s *AuthService) CheckPassword(password, hashedPassword string) bool {
-	err := bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(password))
+	compare := bcrypt.CompareHashAndPassword
+	if s != nil && s.passwordComparer != nil {
+		compare = s.passwordComparer
+	}
+	err := compare([]byte(hashedPassword), []byte(password))
 	return err == nil
 }
 
