@@ -744,6 +744,7 @@ func TestSettingService_LoadForwardedClientIPSettingsLoadsHeaders(t *testing.T) 
 		SettingKeyAPIKeyACLTrustForwardedIP: "true",
 		SettingKeyForwardedClientIPHeaders:  `[" x-cdn-ip ","true-client-ip"]`,
 		settingKeyForwardedClientIPModeV2:   "true",
+		settingKeyForwardedIPTrustResetV3:   "true",
 	}}
 	cfg := &config.Config{}
 	svc := NewSettingService(repo, cfg)
@@ -759,6 +760,7 @@ func TestSettingService_LoadForwardedClientIPSettingsMalformedHeadersDisablesCus
 	repo := &forwardedIPMigrationRepoStub{values: map[string]string{
 		SettingKeyAPIKeyACLTrustForwardedIP: "true",
 		SettingKeyForwardedClientIPHeaders:  `["X Invalid"]`,
+		settingKeyForwardedIPTrustResetV3:   "true",
 	}}
 	cfg := &config.Config{}
 	svc := NewSettingService(repo, cfg)

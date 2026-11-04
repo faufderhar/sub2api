@@ -190,6 +190,10 @@ security:
   # 旧版兼容开关（默认 false）。仅当直连地址在 server.trusted_proxies 内且此开关为
   # true 时，按旧版优先级（自定义头、CF-Connecting-IP、X-Real-IP、XFF 最左公网地址）
   # 取 IP；不可信直连地址无论如何都不会采信转发头。
+  # 升级说明：首次启动本版本时会做一次性迁移，把数据库里存量的 true 重置为 false；
+  # 只有这里（或环境变量 SECURITY_TRUST_FORWARDED_IP_FOR_API_KEY_ACL）显式写 true 时不重置。
+  # Upgrade: the first start of this release resets a stored DB value of true to
+  # false once, unless this key or the env var explicitly sets true.
   trust_forwarded_ip_for_api_key_acl: false
   # Password-login lockout counted per account + client IP (account = normalized
   # login email, IP = the resolved client IP, see server.trusted_proxies).

@@ -45,8 +45,11 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		return err
 	}
 	forwardedClientIPHeaders := []string{}
+	// 全新安装：只有配置/环境变量显式设为 true 时才写 true，否则写安全默认值 false。
+	forwardedIPTrustDefault := false
 	if s != nil && s.cfg != nil {
 		forwardedClientIPHeaders = s.cfg.ForwardedClientIPSettings().Headers
+		forwardedIPTrustDefault = s.cfg.ForwardedIPTrustExplicitlyEnabled()
 	}
 	forwardedClientIPHeadersJSON, err := json.Marshal(forwardedClientIPHeaders)
 	if err != nil {
@@ -64,9 +67,10 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyLoginAgreementMode:                        defaultLoginAgreementMode,
 		SettingKeyLoginAgreementUpdatedAt:                   defaultLoginAgreementDate,
 		SettingKeyLoginAgreementDocuments:                   loginAgreementDocumentsJSON,
-		SettingKeyAPIKeyACLTrustForwardedIP:                 "false",
+		SettingKeyAPIKeyACLTrustForwardedIP:                 strconv.FormatBool(forwardedIPTrustDefault),
 		SettingKeyForwardedClientIPHeaders:                  string(forwardedClientIPHeadersJSON),
 		settingKeyForwardedClientIPModeV2:                   "true",
+		settingKeyForwardedIPTrustResetV3:                   "true",
 		SettingKeySiteName:                                  "Sub2API",
 		SettingKeySiteLogo:                                  "",
 		SettingKeyPurchaseSubscriptionEnabled:               "false",

@@ -794,8 +794,11 @@ type SecurityConfig struct {
 	ProxyProbe      ProxyProbeConfig     `mapstructure:"proxy_probe"`
 	// TrustForwardedIPForAPIKeyACL enables legacy raw forwarded-header takeover.
 	// When disabled, server.trusted_proxies is authoritative for all client-IP consumers.
-	TrustForwardedIPForAPIKeyACL bool     `mapstructure:"trust_forwarded_ip_for_api_key_acl"`
-	ForwardedClientIPHeaders     []string `mapstructure:"forwarded_client_ip_headers" json:"forwarded_client_ip_headers" yaml:"forwarded_client_ip_headers"`
+	TrustForwardedIPForAPIKeyACL bool `mapstructure:"trust_forwarded_ip_for_api_key_acl"`
+	// TrustForwardedIPForAPIKeyACLExplicit 配置文件或环境变量
+	// （SECURITY_TRUST_FORWARDED_IP_FOR_API_KEY_ACL）显式写了该项；只用于 BD-1 一次性迁移判断。
+	TrustForwardedIPForAPIKeyACLExplicit bool     `mapstructure:"-" yaml:"-"`
+	ForwardedClientIPHeaders             []string `mapstructure:"forwarded_client_ip_headers" json:"forwarded_client_ip_headers" yaml:"forwarded_client_ip_headers"`
 	// LoginLockout 按「账号（登录邮箱）+ 客户端 IP」计数的密码登录失败锁定。
 	LoginLockout                  LoginLockoutConfig                         `mapstructure:"login_lockout"`
 	forwardedClientIPSettingsLive *atomic.Pointer[ForwardedClientIPSettings] `mapstructure:"-" json:"-" yaml:"-"`
@@ -869,6 +872,12 @@ func (c *Config) ForwardedClientIPSettings() ForwardedClientIPSettings {
 		TrustForwardedIP: c.Security.TrustForwardedIPForAPIKeyACL,
 		Headers:          cloneForwardedClientIPHeaders(c.Security.ForwardedClientIPHeaders),
 	}
+}
+
+// ForwardedIPTrustExplicitlyEnabled 配置文件或环境变量显式把
+// security.trust_forwarded_ip_for_api_key_acl 设为 true。
+func (c *Config) ForwardedIPTrustExplicitlyEnabled() bool {
+	return c != nil && c.Security.TrustForwardedIPForAPIKeyACLExplicit && c.Security.TrustForwardedIPForAPIKeyACL
 }
 
 func (c *Config) TrustForwardedIPForAPIKeyACL() bool {
@@ -2004,6 +2013,8 @@ func load(allowMissingJWTSecret bool) (*Config, error) {
 	cfg.OIDC.UserInfoIDPath = strings.TrimSpace(cfg.OIDC.UserInfoIDPath)
 	cfg.OIDC.UserInfoUsernamePath = strings.TrimSpace(cfg.OIDC.UserInfoUsernamePath)
 	cfg.OIDC.UsePKCEExplicit = hasExplicitConfigOrEnv("oidc_connect.use_pkce", "OIDC_CONNECT_USE_PKCE")
+	cfg.Security.TrustForwardedIPForAPIKeyACLExplicit = hasExplicitConfigOrEnv(
+		"security.trust_forwarded_ip_for_api_key_acl", "SECURITY_TRUST_FORWARDED_IP_FOR_API_KEY_ACL")
 	cfg.OIDC.ValidateIDTokenExplicit = hasExplicitConfigOrEnv("oidc_connect.validate_id_token", "OIDC_CONNECT_VALIDATE_ID_TOKEN")
 	cfg.Dashboard.KeyPrefix = strings.TrimSpace(cfg.Dashboard.KeyPrefix)
 	cfg.CORS.AllowedOrigins = normalizeStringSlice(cfg.CORS.AllowedOrigins)

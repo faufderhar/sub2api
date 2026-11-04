@@ -87,13 +87,22 @@ proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
 proxy_set_header X-Real-IP       $remote_addr;
 ```
 
-**Upgrade note.** Older releases re-enabled the legacy switch automatically
-when `server.trusted_proxies` was not configured; that migration no longer
-flips the value. Existing installations that have the switch stored as `true`
-keep it, but it now only applies to trusted peers. Deployments behind a proxy
-must set `server.trusted_proxies`, otherwise every request appears to come
-from the proxy address (shared rate-limit buckets, IP allowlists matching the
-proxy).
+**Upgrade note (one-time reset of the legacy switch).** Older releases
+re-enabled the legacy switch automatically when `server.trusted_proxies` was
+not configured, and the admin settings page wrote the effective value back to
+the database on every save, so most existing installations have
+`api_key_acl_trust_forwarded_ip=true` stored without anyone choosing it. On
+the first start of this release a one-time migration (settings marker
+`forwarded_client_ip_trust_reset_v3_migrated`) resets that stored value to
+`false`, unless the config file or the environment variable
+`SECURITY_TRUST_FORWARDED_IP_FOR_API_KEY_ACL` explicitly sets it to `true`.
+The migration runs once; if an admin turns the switch back on in the settings
+page afterwards, later restarts and upgrades keep it. Saving the settings page
+no longer writes `true` back unless the admin actually switched it on.
+
+Deployments behind a proxy must set `server.trusted_proxies`, otherwise every
+request appears to come from the proxy address (shared rate-limit buckets,
+login lockout per proxy IP, IP allowlists matching the proxy).
 
 Example for a proxy on the same host:
 

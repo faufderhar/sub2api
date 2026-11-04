@@ -277,6 +277,10 @@ const (
 	SettingKeyAPIKeyACLTrustForwardedIP = "api_key_acl_trust_forwarded_ip" // API Key IP 白/黑名单是否信任转发 IP
 	SettingKeyForwardedClientIPHeaders  = "forwarded_client_ip_headers"    // 自定义 CDN 客户端 IP 请求头（JSON 数组）
 	settingKeyForwardedClientIPModeV2   = "forwarded_client_ip_mode_v2_migrated"
+	// settingKeyForwardedIPTrustResetV3 BD-1 一次性迁移标记：升级时把存量的
+	// api_key_acl_trust_forwarded_ip=true 重置为 false（配置/环境变量显式 true 时除外）。
+	// 标记写入后不再执行，管理员之后手动打开的值不会被再次重置。
+	settingKeyForwardedIPTrustResetV3 = "forwarded_client_ip_trust_reset_v3_migrated"
 
 	// TOTP 双因素认证设置
 	SettingKeyTotpEnabled    = "totp_enabled"    // 是否启用 TOTP 2FA 功能
