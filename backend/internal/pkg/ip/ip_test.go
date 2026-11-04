@@ -3,6 +3,7 @@
 package ip
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"testing"
 
@@ -409,4 +410,60 @@ func TestSetTrustedProxiesReportsInvalidEntries(t *testing.T) {
 
 	SetTrustedProxies(nil)
 	require.False(t, TrustedProxiesConfigured())
+}
+
+// BD-2: HAProxy option forwardfor / Envoy / Go ReverseProxy append a new
+// X-Forwarded-For line instead of merging; all lines must be joined in order
+// before the right-to-left walk, otherwise the client-supplied first line wins.
+func TestClientIPJoinsMultipleForwardedForLines(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	useTrustedProxies(t, "10.0.0.0/8")
+
+	cases := []struct {
+		name string
+		peer string
+		xff  []string
+		real []string
+		want string
+	}{
+		{name: "proxy appended second line wins", peer: "10.0.0.1:1", xff: []string{"203.0.113.50", "198.51.100.7"}, want: "198.51.100.7"},
+		{name: "trusted hop in last line skipped", peer: "10.0.0.1:1", xff: []string{"203.0.113.50", "198.51.100.7, 10.0.0.9"}, want: "198.51.100.7"},
+		{name: "comma list in first line plus appended line", peer: "10.0.0.1:1", xff: []string{"1.1.1.1, 203.0.113.50", "198.51.100.7"}, want: "198.51.100.7"},
+		{name: "invalid appended line abandons xff", peer: "10.0.0.1:1", xff: []string{"203.0.113.50", "garbage"}, want: "10.0.0.1"},
+		{name: "multiple x-real-ip lines are untrusted", peer: "10.0.0.1:1", real: []string{"203.0.113.50", "198.51.100.7"}, want: "10.0.0.1"},
+		{name: "single x-real-ip still honoured", peer: "10.0.0.1:1", real: []string{"198.51.100.7"}, want: "198.51.100.7"},
+		{name: "untrusted peer ignores all lines", peer: "172.30.0.2:1", xff: []string{"203.0.113.50", "198.51.100.7"}, want: "172.30.0.2"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := gin.New()
+			r.GET("/t", func(c *gin.Context) { c.String(200, ClientIP(c)) })
+			req := httptest.NewRequest("GET", "/t", nil)
+			req.RemoteAddr = tc.peer
+			for _, v := range tc.xff {
+				req.Header.Add("X-Forwarded-For", v)
+			}
+			for _, v := range tc.real {
+				req.Header.Add("X-Real-IP", v)
+			}
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+			require.Equal(t, tc.want, w.Body.String())
+		})
+	}
+}
+
+func TestForwardedHeaderHelpers(t *testing.T) {
+	h := http.Header{}
+	require.Equal(t, "", forwardedForChain(h))
+	h.Add("X-Forwarded-For", "1.1.1.1")
+	require.Equal(t, "1.1.1.1", forwardedForChain(h))
+	h.Add("X-Forwarded-For", "2.2.2.2, 3.3.3.3")
+	require.Equal(t, "1.1.1.1,2.2.2.2, 3.3.3.3", forwardedForChain(h))
+
+	require.Equal(t, "", singleValueForwardedHeader(h, "X-Real-IP"))
+	h.Add("X-Real-IP", "4.4.4.4")
+	require.Equal(t, "4.4.4.4", singleValueForwardedHeader(h, "X-Real-IP"))
+	h.Add("X-Real-IP", "5.5.5.5")
+	require.Equal(t, "", singleValueForwardedHeader(h, "X-Real-IP"))
 }

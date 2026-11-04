@@ -3,6 +3,7 @@ package ip
 
 import (
 	"net"
+	"net/http"
 	"net/netip"
 	"strings"
 	"sync/atomic"
@@ -143,11 +144,42 @@ func ClientIP(c *gin.Context) string {
 	return peer
 }
 
-// trustedChainClientIP 与 Gin 的 ClientIP 语义一致：依次检查 X-Forwarded-For、X-Real-IP，
-// 从右往左跳过可信代理，返回第一个不可信地址；遇到非法值时放弃该请求头。
+// forwardedForChain 把所有 X-Forwarded-For 头行按出现顺序用逗号拼接。
+// HAProxy option forwardfor、部分 Envoy / Go ReverseProxy 会追加一行新的 XFF
+// 而不是合并到已有行；只读第一行会让客户端伪造的值被当作代理写入的值。
+func forwardedForChain(h http.Header) string {
+	values := h.Values("X-Forwarded-For")
+	switch len(values) {
+	case 0:
+		return ""
+	case 1:
+		return values[0]
+	default:
+		return strings.Join(values, ",")
+	}
+}
+
+// singleValueForwardedHeader 返回单值转发头（X-Real-IP、CF-Connecting-IP 等）的值。
+// 这类头按约定只应出现一次；出现多行说明客户端自带了一份、代理又追加了一份，
+// 无法判断哪一行可信，因此整体视为不可信（返回空）。
+func singleValueForwardedHeader(h http.Header, name string) string {
+	values := h.Values(name)
+	if len(values) != 1 {
+		return ""
+	}
+	return values[0]
+}
+
+// trustedChainClientIP 与 Gin 的 ClientIP 语义一致：依次检查 X-Forwarded-For（多行按顺序拼接）、
+// X-Real-IP（多行视为不可信），从右往左跳过可信代理，返回第一个不可信地址；遇到非法值时放弃该请求头。
 func trustedChainClientIP(c *gin.Context) string {
 	for _, header := range []string{"X-Forwarded-For", "X-Real-IP"} {
-		value := c.Request.Header.Get(header)
+		var value string
+		if header == "X-Forwarded-For" {
+			value = forwardedForChain(c.Request.Header)
+		} else {
+			value = singleValueForwardedHeader(c.Request.Header, header)
+		}
 		if strings.TrimSpace(value) == "" {
 			continue
 		}
@@ -231,13 +263,13 @@ func resolveCustomForwardedClientIP(c *gin.Context, headers []string) (string, s
 
 func resolveLegacyForwardedHeaderIP(c *gin.Context) (string, string) {
 	var fallback string
-	if forwarded := normalizeValidIP(c.GetHeader("CF-Connecting-IP")); forwarded != "" {
+	if forwarded := normalizeValidIP(singleValueForwardedHeader(c.Request.Header, "CF-Connecting-IP")); forwarded != "" {
 		fallback = forwarded
 		if !isPrivateIP(forwarded) {
 			return forwarded, fallback
 		}
 	}
-	if realIP := normalizeValidIP(c.GetHeader("X-Real-IP")); realIP != "" {
+	if realIP := normalizeValidIP(singleValueForwardedHeader(c.Request.Header, "X-Real-IP")); realIP != "" {
 		if fallback == "" {
 			fallback = realIP
 		}
@@ -245,7 +277,7 @@ func resolveLegacyForwardedHeaderIP(c *gin.Context) (string, string) {
 			return realIP, fallback
 		}
 	}
-	if xff := c.GetHeader("X-Forwarded-For"); xff != "" {
+	if xff := forwardedForChain(c.Request.Header); xff != "" {
 		ips := strings.Split(xff, ",")
 		for _, candidate := range ips {
 			candidate = normalizeValidIP(candidate)
