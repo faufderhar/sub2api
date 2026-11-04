@@ -18,6 +18,7 @@ export default {
     required: '必填',
     sending: '发送中...',
     tryAgain: '请重试',
+    componentLoadFailed: '内容加载失败，请重试；如果一直失败，请刷新页面',
     update: '更新',
     confirm: '确认',
     reset: '重置',
