@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	servermiddleware "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -314,7 +315,7 @@ func closeWS(conn *websocket.Conn, code int, reason string) {
 // QPSWSHandler handles realtime QPS push via WebSocket.
 // GET /api/v1/admin/ops/ws/qps
 func (h *OpsHandler) QPSWSHandler(c *gin.Context) {
-	clientIP := requestClientIP(c.Request)
+	clientIP := opsWSClientIP(c)
 
 	if h == nil || h.opsService == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "ops service not initialized"})
@@ -609,29 +610,16 @@ func requestPeerIP(r *http.Request) (netip.Addr, bool) {
 	return addr.Unmap(), true
 }
 
-func requestClientIP(r *http.Request) string {
-	if r == nil {
+// opsWSClientIP 返回 per-IP 连接数限制使用的客户端 IP（BD-4）。
+// 统一使用 ip.ClientIP：直连地址不在 server.trusted_proxies 内时忽略一切转发头，
+// 直连可信时按可信代理链从右往左解析，与登录锁定、IP 限流、ACL 取值一致。
+// OPS_WS_TRUST_PROXY / OPS_WS_TRUSTED_PROXIES 只影响 Origin 校验时是否采信
+// X-Forwarded-Host，不再影响客户端 IP（旧实现取 XFF 最左值，可被伪造绕过 per-IP 限制）。
+func opsWSClientIP(c *gin.Context) string {
+	if c == nil || c.Request == nil {
 		return ""
 	}
-
-	trustProxyHeaders := shouldTrustOpsWSProxyHeaders(r)
-	if trustProxyHeaders {
-		xff := strings.TrimSpace(r.Header.Get("X-Forwarded-For"))
-		if xff != "" {
-			// Use the left-most entry (original client). If multiple proxies add values, they are comma-separated.
-			xff = strings.TrimSpace(strings.Split(xff, ",")[0])
-			xff = strings.TrimPrefix(xff, "[")
-			xff = strings.TrimSuffix(xff, "]")
-			if addr, err := netip.ParseAddr(xff); err == nil && addr.IsValid() {
-				return addr.Unmap().String()
-			}
-		}
-	}
-
-	if peer, ok := requestPeerIP(r); ok && peer.IsValid() {
-		return peer.String()
-	}
-	return ""
+	return ip.ClientIP(c)
 }
 
 func isAddrInTrustedProxies(addr netip.Addr, trusted []netip.Prefix) bool {
