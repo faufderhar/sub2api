@@ -1,13 +1,15 @@
 <template>
   <!-- Custom Home Content: Full Page Mode -->
   <div v-if="hasHomeContent" class="min-h-screen">
-    <!-- iframe mode -->
+    <!-- iframe mode：只嵌入 https 绝对地址（L-1） -->
     <iframe
-      v-if="isHomeContentUrl"
-      :src="homeContent.trim()"
+      v-if="homeContentEmbedUrl"
+      :src="homeContentEmbedUrl"
       class="h-screen w-full border-0"
       allowfullscreen
     ></iframe>
+    <!-- URL 模式但不是 https（如 http://）：不嵌入，呈现与富文本里 iframe 被移除时一致（空白容器） -->
+    <div v-else-if="isHomeContentUrl" data-testid="home-content-url-blocked"></div>
     <!-- HTML mode - SECURITY: homeContent 由管理员配置，渲染前仍经 DOMPurify 清洗（L-1） -->
     <div v-else v-html="sanitizedHomeContent"></div>
   </div>
@@ -500,7 +502,7 @@ import { useAuthStore, useAppStore } from '@/stores'
 import LocaleSwitcher from '@/components/common/LocaleSwitcher.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { sanitizeUrl } from '@/utils/url'
-import { sanitizeHomeContent } from '@/utils/sanitize'
+import { isHttpsAbsoluteUrl, sanitizeHomeContent } from '@/utils/sanitize'
 import { FeatureFlags, isFeatureFlagEnabled } from '@/utils/featureFlags'
 
 const { t } = useI18n()
@@ -520,9 +522,13 @@ const compactHomeEnabled = computed(() => appStore.cachedPublicSettings?.compact
 const modelPlazaEnabled = computed(() => isFeatureFlagEnabled(FeatureFlags.modelPlaza))
 
 // Check if homeContent is a URL (for iframe display)
-const isHomeContentUrl = computed(() => {
+// URL 模式判定：trim 后以 http:// 或 https:// 开头，协议名不区分大小写（与浏览器解析 URL 的规则一致，
+// 避免 HTTP:// 之类的写法绕过下面的 https 限制、被当成富文本显示出来）。
+const isHomeContentUrl = computed(() => /^https?:\/\//i.test(homeContent.value.trim()))
+// 只有能解析为 https 绝对地址时才整页嵌入（L-1）；http:// 等不嵌入
+const homeContentEmbedUrl = computed(() => {
   const content = homeContent.value.trim()
-  return content.startsWith('http://') || content.startsWith('https://')
+  return isHomeContentUrl.value && isHttpsAbsoluteUrl(content) ? content : ''
 })
 
 // Theme

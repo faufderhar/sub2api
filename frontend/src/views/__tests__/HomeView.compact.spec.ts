@@ -198,4 +198,57 @@ describe('HomeView custom home_content (L-1)', () => {
     const wrapper = mountHome({ home_content: 'https://example.com/home' })
     expect(wrapper.get('iframe').attributes('src')).toBe('https://example.com/home')
   })
+
+  describe('URL 模式只嵌入 https 绝对地址', () => {
+    it.each([
+      ['https', 'https://example.com/home', 'https://example.com/home'],
+      ['首尾空白/换行', ' \n https://example.com/home?a=1#x \t', 'https://example.com/home?a=1#x'],
+      ['大写协议 HTTPS', 'HTTPS://example.com/home', 'HTTPS://example.com/home'],
+      ['大小写混合 HtTpS', 'HtTpS://Example.com/', 'HtTpS://Example.com/']
+    ])('嵌入：%s', (_name, content, src) => {
+      const wrapper = mountHome({ compact_home_enabled: true, home_content: content })
+      expect(wrapper.findAll('iframe')).toHaveLength(1)
+      expect(wrapper.get('iframe').attributes('src')).toBe(src)
+      expect(wrapper.find('[data-testid="home-content-url-blocked"]').exists()).toBe(false)
+    })
+
+    it.each([
+      ['http', 'http://example.com/home'],
+      ['大写 HTTP', 'HTTP://example.com/home'],
+      ['大小写混合 hTtP + 空白', '  hTtP://example.com/home  '],
+      ['https 但无法解析（IPv6 主机不完整）', 'https://[::1/home'],
+      ['https 但无主机', 'https:///'],
+    ])('不嵌入：%s，呈现为空白容器，不当作文本/富文本、也不回退到默认首页', (_name, content) => {
+      const wrapper = mountHome({ compact_home_enabled: true, home_content: content })
+      expect(wrapper.find('iframe').exists()).toBe(false)
+      const blocked = wrapper.get('[data-testid="home-content-url-blocked"]')
+      expect(blocked.text()).toBe('')
+      expect(blocked.element.innerHTML).toBe('')
+      expect(wrapper.text()).not.toContain('example')
+      expect(wrapper.find('[data-testid="compact-home"]').exists()).toBe(false)
+    })
+
+    it('与富文本里 http iframe 被移除时的呈现一致（都是空的自定义首页容器）', () => {
+      const urlMode = mountHome({ home_content: 'http://example.com/home' })
+      const richMode = mountHome({ home_content: '<iframe src="http://example.com/home"></iframe>' })
+      expect(urlMode.find('iframe').exists()).toBe(false)
+      expect(richMode.find('iframe').exists()).toBe(false)
+      expect(urlMode.text()).toBe('')
+      expect(richMode.text()).toBe('')
+    })
+
+    it.each([
+      ['javascript:', 'javascript:alert(1)//https://example.com'],
+      ['JavaScript 大小写', ' JaVaScRiPt:alert(1)'],
+      ['data:', 'data:text/html,<script>window.__xss=9</script><img src=x onerror="window.__xss=10">'],
+      ['协议相对 //host', '//example.com/home'],
+    ])('%s 开头的内容不是 URL 模式，仍走富文本清洗', (_name, content) => {
+      const wrapper = mountHome({ home_content: content })
+      expect(wrapper.find('iframe').exists()).toBe(false)
+      expect(wrapper.find('[data-testid="home-content-url-blocked"]').exists()).toBe(false)
+      const html = wrapper.html()
+      expect(html).not.toMatch(/<script|onerror/i)
+      expect((window as unknown as { __xss?: number }).__xss).toBeUndefined()
+    })
+  })
 })
