@@ -182,3 +182,20 @@ describe('HomeView compact mode', () => {
     expect(modelPlazaDestination(wrapper)).toBeUndefined()
   })
 })
+
+describe('HomeView custom home_content (L-1)', () => {
+  it('HTML 模式下渲染前经 DOMPurify 清洗，脚本与事件属性不会进入 DOM', () => {
+    const wrapper = mountHome({
+      home_content: '<h2 class="t">Welcome</h2><img src=x onerror="window.__xss=1"><script>window.__xss=2</script>',
+    })
+    const html = wrapper.html()
+    expect(html).toContain('<h2 class="t">Welcome</h2>')
+    expect(html).not.toMatch(/onerror|<script/i)
+    expect((window as unknown as { __xss?: number }).__xss).toBeUndefined()
+  })
+
+  it('URL 模式仍用 iframe 展示', () => {
+    const wrapper = mountHome({ home_content: 'https://example.com/home' })
+    expect(wrapper.get('iframe').attributes('src')).toBe('https://example.com/home')
+  })
+})
