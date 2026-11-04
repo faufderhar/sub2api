@@ -53,6 +53,11 @@ services:
       # Uncomment to enable (an empty value would override config.yaml):
       # 取消注释后生效（设置为空值会覆盖 config.yaml）：
       # - SERVER_TRUSTED_PROXIES=${SERVER_TRUSTED_PROXIES}
+      # Non-gateway API body cap (bytes) and body read timeouts (seconds)
+      # 非网关接口请求体上限（字节）与请求体读取超时（秒）
+      - SERVER_API_MAX_REQUEST_BODY_SIZE=${SERVER_API_MAX_REQUEST_BODY_SIZE:-1048576}
+      - SERVER_API_READ_TIMEOUT=${SERVER_API_READ_TIMEOUT:-30}
+      - SERVER_API_LARGE_BODY_READ_TIMEOUT=${SERVER_API_LARGE_BODY_READ_TIMEOUT:-600}
       # Per-account login lockout / 按账号登录失败锁定
       - SECURITY_LOGIN_LOCKOUT_ENABLED=${SECURITY_LOGIN_LOCKOUT_ENABLED:-true}
       - SECURITY_LOGIN_LOCKOUT_MAX_FAILURES=${SECURITY_LOGIN_LOCKOUT_MAX_FAILURES:-10}

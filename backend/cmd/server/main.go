@@ -99,6 +99,11 @@ func runSetupServer() {
 	r.Use(middleware.Recovery())
 	r.Use(middleware.CORS(config.CORSConfig{}))
 	r.Use(middleware.SecurityHeaders(config.CSPConfig{Enabled: true, Policy: config.DefaultCSPPolicy}, nil))
+	// M-1：安装向导接口无需大请求体，统一 1MB 上限 + 请求体读取超时。
+	r.Use(middleware.APIBodyGuard(middleware.APIBodyGuardConfig{
+		MaxBodyBytes: config.DefaultAPIMaxRequestBodySize,
+		ReadTimeout:  time.Duration(config.DefaultAPIReadTimeoutSeconds) * time.Second,
+	}))
 
 	// Register setup routes
 	setup.RegisterRoutes(r)
@@ -120,7 +125,7 @@ func runSetupServer() {
 
 	server := &http.Server{
 		Addr:              addr,
-		Handler:           r,
+		Handler:           http.MaxBytesHandler(r, config.DefaultAPIMaxRequestBodySize),
 		ReadHeaderTimeout: 30 * time.Second,
 		IdleTimeout:       120 * time.Second,
 		Protocols:         protocols,

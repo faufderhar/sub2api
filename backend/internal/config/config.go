@@ -739,16 +739,19 @@ type PricingConfig struct {
 type ServerConfig struct {
 	Host                     string    `mapstructure:"host"`
 	Port                     int       `mapstructure:"port"`
-	Mode                     string    `mapstructure:"mode"`                  // debug/release
-	EnableServerTiming       bool      `mapstructure:"enable_server_timing"`  // Admin UI Server-Timing response header
-	FrontendURL              string    `mapstructure:"frontend_url"`          // 前端基础 URL，用于生成邮件中的外部链接
-	ReadHeaderTimeout        int       `mapstructure:"read_header_timeout"`   // 读取请求头超时（秒）
-	MaxHeaderBytes           int       `mapstructure:"max_header_bytes"`      // 请求头最大字节数（HTTP/2 映射为 header-list 上限）
-	IdleTimeout              int       `mapstructure:"idle_timeout"`          // 空闲连接超时（秒）
-	TrustedProxies           []string  `mapstructure:"trusted_proxies"`       // 可信代理列表（CIDR/IP）
-	TrustedProxiesConfigured bool      `mapstructure:"-" json:"-" yaml:"-"`   // 是否显式配置了可信代理列表
-	MaxRequestBodySize       int64     `mapstructure:"max_request_body_size"` // 全局最大请求体限制
-	H2C                      H2CConfig `mapstructure:"h2c"`                   // HTTP/2 Cleartext 配置
+	Mode                     string    `mapstructure:"mode"`                        // debug/release
+	EnableServerTiming       bool      `mapstructure:"enable_server_timing"`        // Admin UI Server-Timing response header
+	FrontendURL              string    `mapstructure:"frontend_url"`                // 前端基础 URL，用于生成邮件中的外部链接
+	ReadHeaderTimeout        int       `mapstructure:"read_header_timeout"`         // 读取请求头超时（秒）
+	MaxHeaderBytes           int       `mapstructure:"max_header_bytes"`            // 请求头最大字节数（HTTP/2 映射为 header-list 上限）
+	IdleTimeout              int       `mapstructure:"idle_timeout"`                // 空闲连接超时（秒）
+	TrustedProxies           []string  `mapstructure:"trusted_proxies"`             // 可信代理列表（CIDR/IP）
+	TrustedProxiesConfigured bool      `mapstructure:"-" json:"-" yaml:"-"`         // 是否显式配置了可信代理列表
+	MaxRequestBodySize       int64     `mapstructure:"max_request_body_size"`       // 全局最大请求体限制
+	APIMaxRequestBodySize    int64     `mapstructure:"api_max_request_body_size"`   // 非网关路由请求体上限（默认 1MB，白名单路由使用 MaxRequestBodySize）
+	APIReadTimeout           int       `mapstructure:"api_read_timeout"`            // 非网关路由请求体读取超时（秒），仅读取请求体期间生效
+	APILargeBodyReadTimeout  int       `mapstructure:"api_large_body_read_timeout"` // 大请求体白名单路由的请求体读取超时（秒）
+	H2C                      H2CConfig `mapstructure:"h2c"`                         // HTTP/2 Cleartext 配置
 }
 
 // H2CConfig HTTP/2 Cleartext 配置
@@ -807,6 +810,12 @@ type LoginLockoutConfig struct {
 	WindowSeconds  int  `mapstructure:"window_seconds"`
 	LockoutSeconds int  `mapstructure:"lockout_seconds"`
 }
+
+const (
+	DefaultAPIMaxRequestBodySize          = 1 << 20 // 1MB
+	DefaultAPIReadTimeoutSeconds          = 30
+	DefaultAPILargeBodyReadTimeoutSeconds = 600
+)
 
 const (
 	DefaultLoginLockoutMaxFailures    = 10
@@ -2123,6 +2132,10 @@ func setDefaults() {
 	viper.SetDefault("server.max_header_bytes", 64*1024)
 	viper.SetDefault("server.idle_timeout", 120) // 120秒空闲超时
 	viper.SetDefault("server.max_request_body_size", int64(256*1024*1024))
+	// M-1：非网关路由默认 1MB 请求体上限与请求体读取超时
+	viper.SetDefault("server.api_max_request_body_size", int64(DefaultAPIMaxRequestBodySize))
+	viper.SetDefault("server.api_read_timeout", DefaultAPIReadTimeoutSeconds)
+	viper.SetDefault("server.api_large_body_read_timeout", DefaultAPILargeBodyReadTimeoutSeconds)
 	// H2C 默认配置
 	viper.SetDefault("server.h2c.enabled", false)
 	viper.SetDefault("server.h2c.max_concurrent_streams", uint32(50))      // 50 个并发流
@@ -2836,6 +2849,18 @@ func (c *Config) Validate() error {
 	}
 	if c.Server.MaxRequestBodySize < 0 {
 		return fmt.Errorf("server.max_request_body_size must be non-negative")
+	}
+	if c.Server.APIMaxRequestBodySize <= 0 {
+		return fmt.Errorf("server.api_max_request_body_size must be positive")
+	}
+	if c.Server.MaxRequestBodySize > 0 && c.Server.APIMaxRequestBodySize > c.Server.MaxRequestBodySize {
+		return fmt.Errorf("server.api_max_request_body_size must not exceed server.max_request_body_size")
+	}
+	if c.Server.APIReadTimeout < 1 || c.Server.APIReadTimeout > 3600 {
+		return fmt.Errorf("server.api_read_timeout must be between 1 and 3600 seconds")
+	}
+	if c.Server.APILargeBodyReadTimeout < 1 || c.Server.APILargeBodyReadTimeout > 3600 {
+		return fmt.Errorf("server.api_large_body_read_timeout must be between 1 and 3600 seconds")
 	}
 	if c.Server.H2C.Enabled {
 		if c.Server.H2C.MaxConcurrentStreams == 0 {

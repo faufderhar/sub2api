@@ -114,10 +114,13 @@ func registerRoutes(
 	redisClient *redis.Client,
 ) {
 	// 通用路由（健康检查、状态等）
-	routes.RegisterCommonRoutes(r)
+	// M-1：非网关路由的请求体上限（默认 1MB）与请求体读取超时；网关路由不经过此中间件。
+	apiBodyGuard := middleware2.APIBodyGuard(newAPIBodyGuardConfig(cfg))
+	routes.RegisterCommonRoutes(r, apiBodyGuard)
 
 	// API v1
 	v1 := r.Group("/api/v1")
+	v1.Use(apiBodyGuard)
 
 	// 面板 API 限流器：认证接口按用户 ID、公开接口按安全客户端 IP，
 	// 防止高频刷管理面接口打爆数据库（阈值可在系统设置中调整）。
@@ -134,4 +137,31 @@ func registerRoutes(
 	routes.RegisterPaymentRoutes(v1, h.Payment, h.PaymentWebhook, h.Admin.Payment, jwtAuth, adminAuth, auditLog, settingService, panelRateLimiter, redisClient)
 
 	handler.RegisterPageRoutes(v1, cfg.Pricing.DataDir, gin.HandlerFunc(jwtAuth), gin.HandlerFunc(adminAuth), settingService)
+}
+
+// newAPIBodyGuardConfig maps server config to the non-gateway body guard settings.
+func newAPIBodyGuardConfig(cfg *config.Config) middleware2.APIBodyGuardConfig {
+	maxBody := cfg.Server.APIMaxRequestBodySize
+	if maxBody <= 0 {
+		maxBody = config.DefaultAPIMaxRequestBodySize
+	}
+	readTimeout := cfg.Server.APIReadTimeout
+	if readTimeout <= 0 {
+		readTimeout = config.DefaultAPIReadTimeoutSeconds
+	}
+	largeTimeout := cfg.Server.APILargeBodyReadTimeout
+	if largeTimeout <= 0 {
+		largeTimeout = config.DefaultAPILargeBodyReadTimeoutSeconds
+	}
+	largeMax := cfg.Server.MaxRequestBodySize
+	if largeMax <= 0 {
+		largeMax = cfg.Gateway.MaxBodySize
+	}
+	return middleware2.APIBodyGuardConfig{
+		MaxBodyBytes:         maxBody,
+		LargeBodyMaxBytes:    largeMax,
+		ReadTimeout:          time.Duration(readTimeout) * time.Second,
+		LargeBodyReadTimeout: time.Duration(largeTimeout) * time.Second,
+		LargeBodyRoutes:      middleware2.APILargeBodyRoutes,
+	}
 }

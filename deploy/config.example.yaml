@@ -74,6 +74,27 @@ server:
   # Applies to all requests, especially important for h2c first request memory protection
   # 适用于所有请求，对 h2c 第一请求的内存保护尤为重要
   max_request_body_size: 268435456
+  # Body cap for non-gateway routes (/api/v1/** management & user API, setup
+  # wizard, /api/event_logging/batch). Default 1MB. Content-Length above it is
+  # rejected with 413 before reading; chunked bodies are cut off at the cap.
+  # Gateway routes (/v1, /v1beta, /responses, ...) keep gateway.max_body_size.
+  # A few admin endpoints are exempt and use max_request_body_size instead:
+  #   PUT  /api/v1/admin/settings
+  #   POST /api/v1/admin/accounts/data | accounts/batch | accounts/batch-update-credentials
+  #   POST /api/v1/admin/proxies/data  | proxies/batch
+  #   POST /api/v1/admin/plugins/upload, PUT /api/v1/admin/plugins/:id/config
+  # 非网关路由（/api/v1/** 管理/用户接口、安装向导、/api/event_logging/batch）的请求体上限，默认 1MB。
+  # Content-Length 超限直接 413 且不读取请求体；chunked 请求读到上限即中止。网关路由仍使用 gateway.max_body_size。
+  # 上面列出的少数管理接口不受 1MB 限制，改用 max_request_body_size。
+  api_max_request_body_size: 1048576
+  # Seconds allowed for reading the request body of non-gateway routes (slow-body
+  # protection). Applies only while the body is being read; responses / SSE and
+  # gateway routes are not affected.
+  # 非网关路由读取请求体的超时（秒），防慢速请求体攻击；只在读取请求体期间生效，不影响响应/SSE，也不作用于网关路由。
+  api_read_timeout: 30
+  # Body read timeout (seconds) for the exempt large-body admin endpoints above.
+  # 上述大请求体管理接口的请求体读取超时（秒）。
+  api_large_body_read_timeout: 600
   # HTTP/2 Cleartext (h2c) configuration
   # HTTP/2 Cleartext (h2c) 配置
   h2c:

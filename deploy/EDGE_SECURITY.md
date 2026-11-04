@@ -11,6 +11,24 @@ terminate healthy long generations and streams.
 - `server.read_header_timeout: 10` bounds slow-header attacks. It does not
   limit request processing or response streaming.
 - `server.max_request_body_size: 268435456` is the absolute 256 MiB safety net.
+- `server.api_max_request_body_size: 1048576` caps request bodies of every
+  non-gateway route (`/api/v1/**`, the setup wizard, `/api/event_logging/batch`)
+  at 1 MiB. A larger `Content-Length` is rejected with 413 before any byte of
+  the body is read; chunked bodies are read at most 1 MiB + 1 byte and then
+  rejected with 413. `server.api_read_timeout: 30` bounds how long reading that
+  body may take (408 on timeout). The deadline is cleared as soon as the body
+  has been read, so long handlers and SSE responses are unaffected. Gateway
+  routes are not covered and keep the gateway limits below and no read timeout.
+- These admin endpoints legitimately need larger bodies and are exempt from the
+  1 MiB cap; they use `server.max_request_body_size` and
+  `server.api_large_body_read_timeout: 600`:
+  `PUT /api/v1/admin/settings`, `POST /api/v1/admin/accounts/data`,
+  `POST /api/v1/admin/accounts/batch`,
+  `POST /api/v1/admin/accounts/batch-update-credentials`,
+  `POST /api/v1/admin/proxies/data`, `POST /api/v1/admin/proxies/batch`,
+  `POST /api/v1/admin/plugins/upload`, `PUT /api/v1/admin/plugins/:id/config`.
+  If your reverse proxy sets `client_max_body_size`, keep it at least as large
+  as what these endpoints need (or scope a larger value to these paths only).
 - `gateway.max_body_size: 268435456` remains available to multimodal, Gemini,
   image, video, and batch-image endpoints.
 - `gateway.text_max_body_size: 33554432` limits the known pure-text
