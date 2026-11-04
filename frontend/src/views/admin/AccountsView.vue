@@ -508,16 +508,13 @@ import DataTable from '@/components/common/DataTable.vue'
 import HelpTooltip from '@/components/common/HelpTooltip.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
-import { CreateAccountModal, EditAccountModal, BulkEditAccountModal, SyncFromCrsModal, TempUnschedStatusModal } from '@/components/account'
+import SyncFromCrsModal from '@/components/account/SyncFromCrsModal.vue'
+import TempUnschedStatusModal from '@/components/account/TempUnschedStatusModal.vue'
 import AccountTableActions from '@/components/admin/account/AccountTableActions.vue'
 import AccountTableFilters from '@/components/admin/account/AccountTableFilters.vue'
 import AccountBulkActionsBar from '@/components/admin/account/AccountBulkActionsBar.vue'
 import AccountActionMenu from '@/components/admin/account/AccountActionMenu.vue'
 import ImportDataModal from '@/components/admin/account/ImportDataModal.vue'
-import ReAuthAccountModal from '@/components/admin/account/ReAuthAccountModal.vue'
-import AccountTestModal from '@/components/admin/account/AccountTestModal.vue'
-import AccountStatsModal from '@/components/admin/account/AccountStatsModal.vue'
-import ScheduledTestsPanel from '@/components/admin/account/ScheduledTestsPanel.vue'
 import type { SelectOption } from '@/components/common/Select.vue'
 import AccountStatusIndicator from '@/components/account/AccountStatusIndicator.vue'
 import AccountUsageCell from '@/components/account/AccountUsageCell.vue'
@@ -528,9 +525,8 @@ import UpstreamBillingRateCell from '@/components/account/UpstreamBillingRateCel
 import AccountPriorityCell from '@/components/account/AccountPriorityCell.vue'
 import PlatformTypeBadge from '@/components/common/PlatformTypeBadge.vue'
 import Icon from '@/components/icons/Icon.vue'
-import ErrorPassthroughRulesModal from '@/components/admin/ErrorPassthroughRulesModal.vue'
-import TLSFingerprintProfilesModal from '@/components/admin/TLSFingerprintProfilesModal.vue'
 import { fetchAllAccountIds } from '@/utils/accountSelection'
+import { lazyModal } from '@/utils/lazyModal'
 import { buildGrokUsageRefreshKey, buildOpenAIUsageRefreshKey } from '@/utils/accountUsageRefresh'
 import { formatDateTime, formatRelativeTime } from '@/utils/format'
 import { proxyExpiryBadgeClass, proxyExpiryLabelKey } from '@/utils/proxyExpiry'
@@ -539,6 +535,17 @@ import { sanitizeUrl } from '@/utils/url'
 import { getFloatingPanelPosition } from '@/utils/floatingPanel'
 import { formatMultiplier } from '@/utils/formatters'
 import type { Account, AccountListItem, AccountPlatform, AccountSchedulerGroupScore, AccountType, AccountUsageInfo, Proxy as AccountProxy, AdminGroup, WindowStats, ClaudeModel, UpstreamBillingProbeSnapshot } from '@/types'
+
+// 体积大的弹窗按需加载：首次打开时才下载对应 chunk（L-11）
+const CreateAccountModal = lazyModal(() => import('@/components/account/CreateAccountModal.vue'))
+const EditAccountModal = lazyModal(() => import('@/components/account/EditAccountModal.vue'))
+const BulkEditAccountModal = lazyModal(() => import('@/components/account/BulkEditAccountModal.vue'))
+const ReAuthAccountModal = lazyModal(() => import('@/components/admin/account/ReAuthAccountModal.vue'))
+const AccountTestModal = lazyModal(() => import('@/components/admin/account/AccountTestModal.vue'))
+const AccountStatsModal = lazyModal(() => import('@/components/admin/account/AccountStatsModal.vue'))
+const ScheduledTestsPanel = lazyModal(() => import('@/components/admin/account/ScheduledTestsPanel.vue'))
+const ErrorPassthroughRulesModal = lazyModal(() => import('@/components/admin/ErrorPassthroughRulesModal.vue'))
+const TLSFingerprintProfilesModal = lazyModal(() => import('@/components/admin/TLSFingerprintProfilesModal.vue'))
 
 const { t } = useI18n()
 const appStore = useAppStore()
