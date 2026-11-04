@@ -791,10 +791,28 @@ type SecurityConfig struct {
 	ProxyProbe      ProxyProbeConfig     `mapstructure:"proxy_probe"`
 	// TrustForwardedIPForAPIKeyACL enables legacy raw forwarded-header takeover.
 	// When disabled, server.trusted_proxies is authoritative for all client-IP consumers.
-	TrustForwardedIPForAPIKeyACL  bool                                       `mapstructure:"trust_forwarded_ip_for_api_key_acl"`
-	ForwardedClientIPHeaders      []string                                   `mapstructure:"forwarded_client_ip_headers" json:"forwarded_client_ip_headers" yaml:"forwarded_client_ip_headers"`
+	TrustForwardedIPForAPIKeyACL bool     `mapstructure:"trust_forwarded_ip_for_api_key_acl"`
+	ForwardedClientIPHeaders     []string `mapstructure:"forwarded_client_ip_headers" json:"forwarded_client_ip_headers" yaml:"forwarded_client_ip_headers"`
+	// LoginLockout 按账号（登录邮箱）的密码登录失败锁定。
+	LoginLockout                  LoginLockoutConfig                         `mapstructure:"login_lockout"`
 	forwardedClientIPSettingsLive *atomic.Pointer[ForwardedClientIPSettings] `mapstructure:"-" json:"-" yaml:"-"`
 }
+
+// LoginLockoutConfig 按账号的登录失败锁定配置。
+// 在 WindowSeconds 内累计失败 MaxFailures 次后，该账号锁定 LockoutSeconds 秒；
+// 锁定期间即使密码正确也拒绝登录，到期自动解锁。账号是否存在不影响计数和返回结果。
+type LoginLockoutConfig struct {
+	Enabled        bool `mapstructure:"enabled"`
+	MaxFailures    int  `mapstructure:"max_failures"`
+	WindowSeconds  int  `mapstructure:"window_seconds"`
+	LockoutSeconds int  `mapstructure:"lockout_seconds"`
+}
+
+const (
+	DefaultLoginLockoutMaxFailures    = 10
+	DefaultLoginLockoutWindowSeconds  = 15 * 60
+	DefaultLoginLockoutLockoutSeconds = 15 * 60
+)
 
 func NormalizeForwardedClientIPHeaders(headers []string) ([]string, error) {
 	normalized := make([]string, 0, len(headers))
@@ -2173,7 +2191,14 @@ func setDefaults() {
 	viper.SetDefault("security.csp.enabled", true)
 	viper.SetDefault("security.csp.policy", DefaultCSPPolicy)
 	viper.SetDefault("security.proxy_probe.insecure_skip_verify", false)
-	viper.SetDefault("security.trust_forwarded_ip_for_api_key_acl", true)
+	// H-1：默认不信任客户端提供的转发头。部署在 Nginx/CDN 后面时请配置
+	// server.trusted_proxies（SERVER_TRUSTED_PROXIES），而不是打开此兼容开关。
+	viper.SetDefault("security.trust_forwarded_ip_for_api_key_acl", false)
+	// H-1：按账号的登录失败锁定（默认 15 分钟内失败 10 次，锁定 15 分钟）
+	viper.SetDefault("security.login_lockout.enabled", true)
+	viper.SetDefault("security.login_lockout.max_failures", DefaultLoginLockoutMaxFailures)
+	viper.SetDefault("security.login_lockout.window_seconds", DefaultLoginLockoutWindowSeconds)
+	viper.SetDefault("security.login_lockout.lockout_seconds", DefaultLoginLockoutLockoutSeconds)
 
 	// Security - disable direct fallback on proxy error
 	viper.SetDefault("security.proxy_fallback.allow_direct_on_error", false)
@@ -2775,6 +2800,17 @@ func (c *Config) Validate() error {
 	}
 	c.Security.ForwardedClientIPHeaders = forwardedClientIPHeaders
 	c.SetForwardedClientIPSettings(c.Security.TrustForwardedIPForAPIKeyACL, forwardedClientIPHeaders)
+	if c.Security.LoginLockout.Enabled {
+		if c.Security.LoginLockout.MaxFailures <= 0 {
+			return fmt.Errorf("security.login_lockout.max_failures must be positive")
+		}
+		if c.Security.LoginLockout.WindowSeconds <= 0 {
+			return fmt.Errorf("security.login_lockout.window_seconds must be positive")
+		}
+		if c.Security.LoginLockout.LockoutSeconds <= 0 {
+			return fmt.Errorf("security.login_lockout.lockout_seconds must be positive")
+		}
+	}
 	proxyProbeURLs, err := normalizeProxyProbeURLs(c.Security.ProxyProbe.URLs)
 	if err != nil {
 		return fmt.Errorf("security.proxy_probe.urls: %w", err)

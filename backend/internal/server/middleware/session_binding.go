@@ -13,8 +13,8 @@ import (
 // SessionBindingContext 全局中间件：将请求的客户端 IP 与 User-Agent 注入
 // request context，供 token 签发路径（登录 / 刷新 / OAuth 回调）读取并写入会话绑定，
 // 同时作为审计日志、会话绑定校验的统一客户端 IP 来源。
-// IP 取值与 API Key IP 限制共用转发 IP 开关：开启时旧版原始转发头逻辑
-// 接管解析，关闭时使用 Gin 的 server.trusted_proxies 可信代理链。
+// IP 统一由 ip.ClientIP 计算：直连地址不在 server.trusted_proxies 内时忽略一切转发头；
+// 直连地址可信时，兼容开关开启走旧版转发头优先级，关闭（默认）走可信代理链。
 func SessionBindingContext(cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		forwardedIPSettings := cfg.ForwardedClientIPSettings()
@@ -22,7 +22,7 @@ func SessionBindingContext(cfg *config.Config) gin.HandlerFunc {
 		userAgent := normalizePersistentText(c.Request.UserAgent(), maxPersistentUserAgentBytes)
 		c.Request.Header.Set("User-Agent", userAgent)
 		binding := &service.SessionBinding{
-			IP:        ip.GetSecurityClientIP(c, forwardedIPSettings.TrustForwardedIP),
+			IP:        ip.ClientIP(c),
 			UserAgent: userAgent,
 		}
 		c.Request = c.Request.WithContext(service.WithSessionBinding(c.Request.Context(), binding))
@@ -37,19 +37,21 @@ func requestSessionBinding(c *gin.Context) *service.SessionBinding {
 		return binding
 	}
 	return &service.SessionBinding{
-		IP:        ip.GetTrustedClientIP(c),
+		IP:        ip.ClientIP(c),
 		UserAgent: normalizePersistentText(c.Request.UserAgent(), maxPersistentUserAgentBytes),
 	}
 }
 
-// SecurityClientIP 返回当前请求用于安全敏感记录（审计日志等）的客户端 IP。
-// 与会话绑定、API Key IP 限制共用同一套客户端 IP 来源。
+// SecurityClientIP 返回当前请求用于安全敏感判断和记录的客户端 IP：
+// API Key / Scoped Admin Key 的 IP 白名单、审计日志、会话绑定、面板限流都用它。
+// 值来自 SessionBindingContext 用 ip.ClientIP 计算的快照，缺失时直接调用 ip.ClientIP，
+// 与 IP 维度限流（internal/middleware.clientIPForRateLimit）是同一个函数。
 func SecurityClientIP(c *gin.Context) string {
 	if binding := service.SessionBindingFromContext(c.Request.Context()); binding != nil &&
 		strings.TrimSpace(binding.IP) != "" {
 		return binding.IP
 	}
-	return ip.GetTrustedClientIP(c)
+	return ip.ClientIP(c)
 }
 
 // enforceSessionBinding 校验 access token 的会话指纹（IP/UA 绑定）。

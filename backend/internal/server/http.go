@@ -10,6 +10,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/handler"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/websearch"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -50,6 +51,7 @@ func ProvideRouter(
 	r := gin.New()
 	r.Use(middleware2.Recovery())
 	configureTrustedProxies(r, cfg.Server)
+	warnLegacyForwardedIPTrust(cfg)
 
 	// Wire up websearch Manager builder so it initializes on startup and rebuilds on config save.
 	settingService.SetWebSearchManagerBuilder(context.Background(), func(cfg *service.WebSearchEmulationConfig, proxyURLs map[int64]string) {
@@ -91,22 +93,47 @@ func ProvideRouter(
 }
 
 func configureTrustedProxies(r *gin.Engine, cfg config.ServerConfig) {
+	trusted := cfg.TrustedProxies
+	if !cfg.TrustedProxiesConfigured {
+		trusted = nil
+	}
 	if cfg.TrustedProxiesConfigured {
 		if err := r.SetTrustedProxies(cfg.TrustedProxies); err != nil {
 			log.Printf("Failed to set trusted proxies: %v", err)
 			_ = r.SetTrustedProxies(nil)
+			trusted = nil
 		}
 		if len(cfg.TrustedProxies) == 0 && cfg.Mode == "release" {
-			log.Printf("Warning: server.trusted_proxies is explicitly empty; forwarded client IP trust is disabled")
+			log.Printf("Warning: server.trusted_proxies is explicitly empty; forwarded client IP headers are ignored")
 		}
 	} else {
 		if err := r.SetTrustedProxies(nil); err != nil {
 			log.Printf("Failed to disable trusted proxies: %v", err)
 		}
 		if cfg.Mode == "release" {
-			log.Printf("Warning: server.trusted_proxies is not configured; disabling the forwarded-IP compatibility switch will use direct peer addresses only")
+			log.Printf("Warning: server.trusted_proxies is not configured; X-Forwarded-For/X-Real-IP are ignored and the direct peer address is used as client IP. " +
+				"If Sub2API runs behind Nginx/Caddy/CDN, set server.trusted_proxies (env SERVER_TRUSTED_PROXIES) to the proxy CIDRs")
 		}
 	}
+	// ip.ClientIP（IP 白名单、限流、审计日志共用）与 Gin 使用同一份可信代理列表。
+	if invalid := ip.SetTrustedProxies(trusted); len(invalid) > 0 {
+		log.Printf("Warning: invalid server.trusted_proxies entries ignored: %v", invalid)
+	}
+}
+
+// warnLegacyForwardedIPTrust 在旧版转发头兼容开关开启但没有可信代理时给出明显告警：
+// 此时转发头一律被忽略，开关不会生效。
+func warnLegacyForwardedIPTrust(cfg *config.Config) {
+	if cfg == nil || !cfg.ForwardedClientIPTrustEnabled() {
+		return
+	}
+	if !ip.TrustedProxiesConfigured() {
+		log.Printf("WARNING: security.trust_forwarded_ip_for_api_key_acl=true but server.trusted_proxies is empty; " +
+			"forwarded headers are ignored until the direct proxy addresses are listed in server.trusted_proxies")
+		return
+	}
+	log.Printf("Warning: security.trust_forwarded_ip_for_api_key_acl=true (legacy forwarded-header precedence) is enabled for requests from trusted proxies; " +
+		"prefer the default trusted-proxy chain")
 }
 
 // ProvideHTTPServer 提供 HTTP 服务器

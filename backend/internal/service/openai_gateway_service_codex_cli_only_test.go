@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
@@ -174,6 +175,9 @@ func TestLogCodexCLIOnlyDetection_RejectedIncludesRequestDetails(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	logSink, restore := captureStructuredLog(t)
 	defer restore()
+	// 172.18.0.1 是 Docker 网桥上的反代，需显式加入可信代理才会解析 X-Real-IP
+	ip.SetTrustedProxies([]string{"172.18.0.0/16"})
+	t.Cleanup(func() { ip.SetTrustedProxies(nil) })
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)

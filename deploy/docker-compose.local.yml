@@ -54,6 +54,24 @@ services:
       - SERVER_PORT=8080
       - SERVER_MODE=${SERVER_MODE:-release}
       - ENABLE_SERVER_TIMING=${ENABLE_SERVER_TIMING:-false}
+      # Trusted reverse proxies / CDN ranges (comma separated). Forwarded IP
+      # headers are ignored unless the direct peer is listed here.
+      #   Host Nginx -> this container: the docker bridge gateway, e.g. 172.17.0.1/32
+      #     (`docker network inspect <project>_sub2api-network` -> Gateway)
+      #   Nginx/Caddy service in this compose file: the compose network subnet
+      #   Cloudflare/CDN -> origin: the CDN egress ranges (firewall the origin too)
+      # 可信反代/CDN 网段（逗号分隔）。直连地址不在列表内时忽略所有转发头。
+      #   宿主机 Nginx -> 容器：填 Docker 网桥网关，如 172.17.0.1/32
+      #   同一 compose 内的 Nginx/Caddy：填 compose 网络子网
+      #   CDN 回源：填 CDN 回源网段，并用防火墙限制源站只允许 CDN 访问
+      # Uncomment to enable (an empty value would override config.yaml):
+      # 取消注释后生效（设置为空值会覆盖 config.yaml）：
+      # - SERVER_TRUSTED_PROXIES=${SERVER_TRUSTED_PROXIES}
+      # Per-account login lockout / 按账号登录失败锁定
+      - SECURITY_LOGIN_LOCKOUT_ENABLED=${SECURITY_LOGIN_LOCKOUT_ENABLED:-true}
+      - SECURITY_LOGIN_LOCKOUT_MAX_FAILURES=${SECURITY_LOGIN_LOCKOUT_MAX_FAILURES:-10}
+      - SECURITY_LOGIN_LOCKOUT_WINDOW_SECONDS=${SECURITY_LOGIN_LOCKOUT_WINDOW_SECONDS:-900}
+      - SECURITY_LOGIN_LOCKOUT_LOCKOUT_SECONDS=${SECURITY_LOGIN_LOCKOUT_LOCKOUT_SECONDS:-900}
       - MCP_PUBLIC_URL=${MCP_PUBLIC_URL:-}
       - RUN_MODE=${RUN_MODE:-standard}
       - SIMPLE_MODE_AUTO_CREATE_DEFAULT_GROUPS=${SIMPLE_MODE_AUTO_CREATE_DEFAULT_GROUPS:-}

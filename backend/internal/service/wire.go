@@ -72,6 +72,7 @@ func ProvideAuthService(
 	affiliateService *AffiliateService,
 	userPlatformQuotaRepo UserPlatformQuotaRepository,
 	mcpOAuthService *MCPOAuthService,
+	loginAttemptCache LoginAttemptCache,
 ) *AuthService {
 	svc := NewAuthService(
 		entClient,
@@ -93,6 +94,7 @@ func ProvideAuthService(
 	if mcpOAuthService != nil {
 		svc.SetMCPGrantRevoker(mcpOAuthService)
 	}
+	svc.SetLoginAttemptCache(loginAttemptCache)
 	return svc
 }
 

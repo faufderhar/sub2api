@@ -29,42 +29,53 @@ the application's responsibility.
 
 ## Trusted client IPs
 
-`security.trust_forwarded_ip_for_api_key_acl` is enabled by default for upgrade
-compatibility. While enabled, raw forwarding headers take over client-IP
-resolution for logs and security-sensitive paths. Custom headers from
-`security.forwarded_client_ip_headers` are checked in configured order before
-the built-in `CF-Connecting-IP`, `X-Real-IP`, and `X-Forwarded-For` fallback.
-Header names are case-insensitive, normalized when loaded, de-duplicated, and
-limited to 16 unique valid HTTP field names. Header values must contain IP
-literals; comma-separated values are supported, invalid entries are skipped,
-and public addresses are preferred over private fallback addresses.
+Sub2API resolves the client IP in exactly one place (`ip.ClientIP`). API-key
+IP allow/deny lists, rate limiting, session binding, audit logs, access logs
+and payment requests all use that result.
 
-The list can be supplied in YAML or with the comma-separated environment
-variable `SECURITY_FORWARDED_CLIENT_IP_HEADERS`; an explicitly empty environment
-value clears YAML values. It is also editable from the admin security settings
-and updates at runtime without a restart. A request snapshots the switch and
-header list together, so one request cannot mix old and new settings. Custom
-headers are ignored completely when the switch is disabled. In that mode Gin's
-`server.trusted_proxies` chain is authoritative: configure only the exact
-CIDR/IP addresses that connect directly to Sub2API. An explicit empty list
-trusts no forwarded client IPs.
+* **Default: forwarded headers are not trusted.** `server.trusted_proxies`
+  defaults to an empty list. Unless the direct TCP peer is inside one of the
+  listed CIDRs/IPs, `X-Forwarded-For`, `X-Real-IP`, `CF-Connecting-IP` and any
+  custom header are ignored and the peer address is the client IP. A client
+  that connects directly cannot spoof its IP.
+* **Trusted peer (default mode).** When the peer is trusted, `X-Forwarded-For`
+  is walked right-to-left, skipping trusted hops, and the first untrusted
+  address wins; `X-Real-IP` is used when there is no usable XFF. A value the
+  client prepends on the left of XFF is therefore never used.
+* **Legacy compatibility** (`security.trust_forwarded_ip_for_api_key_acl`,
+  default `false`, also editable in the admin security settings). When enabled
+  *and* the peer is trusted, the historical precedence is used: custom headers
+  from `security.forwarded_client_ip_headers`, then `CF-Connecting-IP`,
+  `X-Real-IP`, then the leftmost public `X-Forwarded-For` value. Requests from
+  untrusted peers never use forwarded headers, even with the switch on. Only
+  enable it when the edge overwrites (not appends) those headers.
 
-On the first upgrade to this mode, a legacy `false` value is changed to `true`
-only when `server.trusted_proxies` was not explicitly configured; explicit
-proxy policies remain in secure mode. New installations persist the configured
-custom header list during database initialization. Existing installations
-backfill a missing database value from the YAML configuration. A hidden
-migration marker prevents later administrator changes from being overwritten.
-If settings cannot be read or the persisted custom-header list is malformed,
-the process fails closed to trusted-proxy mode with no custom headers. If a
-migration write fails, the computed mode remains active for the current process
-and startup records a warning.
+Configure with YAML or the comma-separated environment variable
+`SERVER_TRUSTED_PROXIES` (an empty value overrides YAML and trusts nothing).
+Startup logs a warning when the list is empty or when the legacy switch is on.
 
-Compatibility takeover accepts forwarded headers without validating the direct
-peer, including any configured custom header. Protect the origin from direct
-access while it is enabled. A CDN deployment must firewall the origin so only
-the CDN or load balancer can reach it, and that proxy must overwrite every
-trusted client-IP header rather than append an untrusted client value.
+| Deployment | `server.trusted_proxies` |
+|------------|--------------------------|
+| Nginx/Caddy on the same host, binary install | `127.0.0.1/32`, `::1/128` |
+| Nginx on the host, Sub2API in Docker (bridge) | docker bridge gateway, e.g. `172.17.0.1/32` (`docker network inspect <project>_sub2api-network`) |
+| Nginx/Caddy service in the same compose network | the compose network subnet, e.g. `172.18.0.0/16` |
+| Cloudflare / CDN directly to origin | the CDN's published egress ranges; firewall the origin to them |
+| CDN -> Nginx -> Sub2API | both the Nginx address and the CDN ranges |
+
+Nginx must forward the chain:
+
+```nginx
+proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+proxy_set_header X-Real-IP       $remote_addr;
+```
+
+**Upgrade note.** Older releases re-enabled the legacy switch automatically
+when `server.trusted_proxies` was not configured; that migration no longer
+flips the value. Existing installations that have the switch stored as `true`
+keep it, but it now only applies to trusted peers. Deployments behind a proxy
+must set `server.trusted_proxies`, otherwise every request appears to come
+from the proxy address (shared rate-limit buckets, IP allowlists matching the
+proxy).
 
 Example for a proxy on the same host:
 
@@ -74,6 +85,29 @@ server:
     - 127.0.0.1/32
     - ::1/128
 ```
+
+## Login lockout
+
+Password logins (`POST /api/v1/auth/login` and the password check of the
+pending OAuth account-adoption flow) are limited per account, keyed by the
+normalized (trimmed, lower-cased, SHA-256 hashed) email:
+
+```yaml
+security:
+  login_lockout:
+    enabled: true        # SECURITY_LOGIN_LOCKOUT_ENABLED
+    max_failures: 10     # SECURITY_LOGIN_LOCKOUT_MAX_FAILURES
+    window_seconds: 900  # SECURITY_LOGIN_LOCKOUT_WINDOW_SECONDS
+    lockout_seconds: 900 # SECURITY_LOGIN_LOCKOUT_LOCKOUT_SECONDS
+```
+
+After `max_failures` failures within `window_seconds`, the account is locked
+for `lockout_seconds`; during the lock even the correct password is rejected
+with HTTP 429 and `reason: LOGIN_LOCKED`. Unknown emails are counted and locked
+the same way, so the response never reveals whether an account exists. A
+successful login clears the failure counter. State lives in Redis; when Redis
+cannot be reached the login fails closed with 503. Because anyone who knows an
+email can trigger the lock, keep the per-IP edge rate limits below as well.
 
 ## Nginx baseline
 

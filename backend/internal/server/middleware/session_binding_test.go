@@ -24,7 +24,8 @@ func TestSessionBindingContextFollowsForwardedIPSwitch(t *testing.T) {
 		trustedProxies []string
 		wantIP         string
 	}{
-		{name: "enabled switch takes over raw headers", trustForwarded: true, wantIP: "1.2.3.4"},
+		{name: "enabled switch without trusted proxy ignores raw headers", trustForwarded: true, wantIP: "127.0.0.1"},
+		{name: "enabled switch behind trusted proxy takes over raw headers", trustForwarded: true, trustedProxies: []string{"127.0.0.1"}, wantIP: "1.2.3.4"},
 		{name: "disabled switch ignores untrusted headers", trustForwarded: false, wantIP: "127.0.0.1"},
 		{name: "disabled switch uses configured Gin proxy", trustForwarded: false, trustedProxies: []string{"127.0.0.1"}, wantIP: "1.2.3.4"},
 	} {
@@ -33,7 +34,7 @@ func TestSessionBindingContextFollowsForwardedIPSwitch(t *testing.T) {
 			cfg.SetTrustForwardedIPForAPIKeyACL(tc.trustForwarded)
 
 			r := gin.New()
-			require.NoError(t, r.SetTrustedProxies(tc.trustedProxies))
+			useTrustedProxies(t, r, tc.trustedProxies)
 			r.Use(SessionBindingContext(cfg))
 			r.GET("/t", func(c *gin.Context) {
 				binding := service.SessionBindingFromContext(c.Request.Context())
@@ -63,7 +64,7 @@ func TestSessionBindingContextSnapshotsForwardedModeAndHeaders(t *testing.T) {
 	cfg.SetForwardedClientIPSettings(true, []string{"X-Initial-IP"})
 
 	r := gin.New()
-	require.NoError(t, r.SetTrustedProxies(nil))
+	useTrustedProxies(t, r, []string{"9.9.9.9"})
 	r.Use(SessionBindingContext(cfg))
 	r.GET("/t", func(c *gin.Context) {
 		binding := service.SessionBindingFromContext(c.Request.Context())
@@ -112,7 +113,7 @@ func TestSecurityClientIPFallsBackWithoutInjectedBinding(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	r := gin.New()
-	require.NoError(t, r.SetTrustedProxies(nil))
+	useTrustedProxies(t, r, nil)
 	r.GET("/t", func(c *gin.Context) {
 		c.String(200, SecurityClientIP(c))
 	})
@@ -134,7 +135,7 @@ func TestRequestSessionBindingPrefersInjectedBinding(t *testing.T) {
 	cfg.SetTrustForwardedIPForAPIKeyACL(true)
 
 	r := gin.New()
-	require.NoError(t, r.SetTrustedProxies([]string{"127.0.0.1"}))
+	useTrustedProxies(t, r, []string{"127.0.0.1"})
 	r.Use(SessionBindingContext(cfg))
 	r.GET("/t", func(c *gin.Context) {
 		issued := &service.SessionBinding{IP: "1.2.3.4", UserAgent: "test-agent"}

@@ -36,12 +36,36 @@ server:
   # Keep-alive idle timeout in seconds.
   # Keep-Alive 空闲连接超时（秒）。
   idle_timeout: 120
-  # Trusted proxies used when security.trust_forwarded_ip_for_api_key_acl is false.
-  # List only the exact proxy addresses that connect directly to Sub2API.
-  # Set [] explicitly to disable forwarded-IP trust in high-security mode.
-  # security.trust_forwarded_ip_for_api_key_acl=false 时使用的可信代理。
-  # 只填写直接连接 Sub2API 的精确代理地址；显式设置 [] 可在高安全模式下
-  # 禁用转发 IP 信任。
+  # Trusted proxy CIDRs/IPs. Forwarded client-IP headers (X-Forwarded-For,
+  # X-Real-IP, CF-Connecting-IP, custom CDN headers) are honoured ONLY when the
+  # direct TCP peer is inside one of these ranges; otherwise they are ignored
+  # and the peer address is the client IP. Default (key omitted): [] = trust no
+  # proxy. The same client IP is used by API-key IP allow/deny lists, rate
+  # limiting, login lockout context, audit and access logs.
+  # Environment: SERVER_TRUSTED_PROXIES=127.0.0.1/32,::1/128 (comma separated)
+  #
+  # 可信代理（CIDR 或单个 IP）。只有当 TCP 直连地址落在这些网段内时，才会解析
+  # X-Forwarded-For / X-Real-IP / CF-Connecting-IP / 自定义 CDN 头；否则一律忽略
+  # 转发头，直接使用直连地址。未配置时默认 []，即不信任任何代理。
+  # IP 白名单、限流、审计日志、访问日志统一使用这个结果。
+  # 环境变量：SERVER_TRUSTED_PROXIES=127.0.0.1/32,::1/128（逗号分隔）
+  #
+  # How to fill it / 怎么填：
+  #   - Nginx/Caddy on the same host, Sub2API run as a binary:
+  #     同机 Nginx/Caddy + 二进制部署：127.0.0.1/32, ::1/128
+  #   - Nginx on the host, Sub2API in Docker (bridge network): the docker bridge
+  #     gateway, e.g. 172.17.0.1/32 (see `docker network inspect <net>`)
+  #     宿主机 Nginx + Docker 部署：填 Docker 网桥网关地址，如 172.17.0.1/32
+  #   - Nginx in the same compose network: that network's subnet, e.g. 172.18.0.0/16
+  #     Nginx 与 Sub2API 在同一 compose 网络：填该网络子网
+  #   - Cloudflare / other CDN directly in front: the CDN's published egress
+  #     ranges (https://www.cloudflare.com/ips/), and firewall the origin to them
+  #     CDN 直连源站：填 CDN 官方公布的回源网段，并在防火墙只放行这些网段
+  #   - CDN -> Nginx -> Sub2API: list both the Nginx address and the CDN ranges;
+  #     X-Forwarded-For is walked right-to-left skipping trusted hops.
+  #     CDN -> Nginx -> Sub2API：Nginx 地址和 CDN 网段都要列出；XFF 从右往左跳过可信跳。
+  # Nginx must set:  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+  #                  proxy_set_header X-Real-IP $remote_addr;
   trusted_proxies:
     - 127.0.0.1/32
     - ::1/128
@@ -138,16 +162,37 @@ mcp:
 # 安全配置
 # =============================================================================
 security:
-  # Legacy compatibility switch. When true, raw forwarded headers take over
-  # server.trusted_proxies. Set false to enforce the trusted proxy chain above.
-  # 旧版兼容开关。开启时原始转发头会接管 server.trusted_proxies；关闭后严格
-  # 使用上方配置的可信代理链。示例配置采用高安全模式。
+  # Legacy compatibility switch (default: false). When true AND the direct peer is
+  # in server.trusted_proxies, the historical header precedence is used (custom
+  # headers, CF-Connecting-IP, X-Real-IP, leftmost public X-Forwarded-For).
+  # Requests from untrusted peers never use forwarded headers, whatever this says.
+  # 旧版兼容开关（默认 false）。仅当直连地址在 server.trusted_proxies 内且此开关为
+  # true 时，按旧版优先级（自定义头、CF-Connecting-IP、X-Real-IP、XFF 最左公网地址）
+  # 取 IP；不可信直连地址无论如何都不会采信转发头。
   trust_forwarded_ip_for_api_key_acl: false
+  # Per-account password-login lockout (account = normalized login email).
+  # After max_failures failed logins within window_seconds, the account is
+  # locked for lockout_seconds; the API returns HTTP 429 with code LOGIN_LOCKED.
+  # Unknown emails are counted and locked the same way, so the response never
+  # reveals whether an account exists. Requires Redis; if Redis is unavailable
+  # login fails closed (503).
+  # 按账号的密码登录失败锁定（账号 = 规范化后的登录邮箱）。window_seconds 内失败
+  # max_failures 次后锁定 lockout_seconds 秒，接口返回 HTTP 429、错误码 LOGIN_LOCKED。
+  # 不存在的邮箱同样计数和锁定，不暴露账号是否存在。依赖 Redis，Redis 不可用时
+  # 登录 fail-close（503）。
+  # Environment / 环境变量: SECURITY_LOGIN_LOCKOUT_ENABLED / _MAX_FAILURES /
+  #   _WINDOW_SECONDS / _LOCKOUT_SECONDS
+  login_lockout:
+    enabled: true
+    max_failures: 10
+    window_seconds: 900
+    lockout_seconds: 900
   # Optional client-IP headers for third-party CDNs, checked in list order before
   # CF-Connecting-IP, X-Real-IP, and X-Forwarded-For. Valid only while the legacy
-  # compatibility switch above is true; maximum 16 unique HTTP header names.
+  # compatibility switch above is true and the peer is a trusted proxy; maximum
+  # 16 unique HTTP header names.
   # 第三方 CDN 的可选客户端 IP 请求头，按列表顺序优先于内置请求头解析。
-  # 仅在上方旧版兼容开关为 true 时生效；最多配置 16 个不重复的合法 HTTP 头名。
+  # 仅在上方旧版兼容开关为 true 且直连地址为可信代理时生效；最多配置 16 个不重复的合法 HTTP 头名。
   # Environment / 环境变量: SECURITY_FORWARDED_CLIENT_IP_HEADERS=True-Client-IP,X-CDN-Client-IP
   forwarded_client_ip_headers: []
   # Example / 示例:

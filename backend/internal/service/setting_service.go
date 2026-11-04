@@ -351,13 +351,10 @@ func (s *SettingService) LoadForwardedClientIPSettings(ctx context.Context) erro
 		updates[SettingKeyForwardedClientIPHeaders] = string(headersJSON)
 	}
 	if values[settingKeyForwardedClientIPModeV2] != "true" {
+		// H-1: the former migration re-enabled raw forwarded-header trust when no
+		// trusted proxies were configured. Forwarded headers are now ignored by
+		// default, so the marker is recorded without flipping the stored value.
 		updates[settingKeyForwardedClientIPModeV2] = "true"
-		// Before this migration, new installations persisted false by default.
-		// Restore compatibility only when no trusted-proxy policy was configured.
-		if headersErr == nil && hasStoredValue && !enabled && !s.cfg.Server.TrustedProxiesConfigured {
-			enabled = true
-			updates[SettingKeyAPIKeyACLTrustForwardedIP] = "true"
-		}
 	}
 	if len(updates) > 0 {
 		if err := s.settingRepo.SetMultiple(ctx, updates); err != nil {

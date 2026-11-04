@@ -87,6 +87,7 @@ type AuthService struct {
 	defaultSubAssigner    DefaultSubscriptionAssigner
 	userPlatformQuotaRepo UserPlatformQuotaRepository
 	mcpGrantRevoker       MCPGrantRevoker
+	loginAttemptCache     LoginAttemptCache
 }
 
 type CaptchaProof struct {
@@ -543,11 +544,16 @@ func (s *AuthService) IsEmailVerifyEnabled(ctx context.Context) bool {
 
 // Login 用户登录，返回JWT token
 func (s *AuthService) Login(ctx context.Context, email, password string) (string, *User, error) {
+	// 按账号的失败锁定：锁定期间直接拒绝（账号不存在时同样计数/锁定，不暴露存在性）
+	if err := s.checkLoginLockout(ctx, email); err != nil {
+		return "", nil, err
+	}
+
 	// 查找用户
 	user, err := s.userRepo.GetByEmail(ctx, email)
 	if err != nil {
 		if errors.Is(err, ErrUserNotFound) {
-			return "", nil, ErrInvalidCredentials
+			return "", nil, s.recordLoginFailure(ctx, email, ErrInvalidCredentials)
 		}
 		// 记录数据库错误但不暴露给用户
 		logger.LegacyPrintf("service.auth", "[Auth] Database error during login: %v", err)
@@ -556,8 +562,9 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (string
 
 	// 验证密码
 	if !s.CheckPassword(password, user.PasswordHash) {
-		return "", nil, ErrInvalidCredentials
+		return "", nil, s.recordLoginFailure(ctx, email, ErrInvalidCredentials)
 	}
+	s.resetLoginFailures(ctx, email)
 
 	// 检查用户状态
 	if !user.IsActive() {

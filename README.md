@@ -572,7 +572,9 @@ Additional security-related options are available in `config.yaml`:
 - `security.response_headers.enabled` to enable configurable response header filtering (disabled uses default allowlist)
 - `security.csp` to control Content-Security-Policy headers
 - `billing.circuit_breaker` to fail closed on billing errors
-- `security.trust_forwarded_ip_for_api_key_acl` enables legacy raw forwarded-header takeover (enabled by default for upgrade compatibility); disable it to enforce `server.trusted_proxies`, which should contain only the exact proxy CIDRs that connect directly to Sub2API
+- `server.trusted_proxies` (`SERVER_TRUSTED_PROXIES`) lists the exact proxy/CDN CIDRs that connect directly to Sub2API. Forwarded client-IP headers are ignored unless the direct peer is in this list (default: empty, trust nothing)
+- `security.trust_forwarded_ip_for_api_key_acl` enables the legacy forwarded-header precedence for trusted peers only (default: `false`)
+- `security.login_lockout.*` locks an account for 15 minutes after 10 failed password logins within 15 minutes (HTTP 429 `LOGIN_LOCKED`; all values configurable)
 - `security.forwarded_client_ip_headers` configures up to 16 third-party CDN client-IP header names; they are checked in order before the built-in headers only while legacy takeover is enabled
 - `turnstile.required` to require Turnstile in release mode
 

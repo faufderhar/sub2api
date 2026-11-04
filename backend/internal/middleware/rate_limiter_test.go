@@ -154,6 +154,9 @@ func TestRateLimiterHonorsForwardedIPSnapshot(t *testing.T) {
 	})
 
 	limiter := NewRateLimiter(redis.NewClient(&redis.Options{Addr: "127.0.0.1:1"}))
+	// 反代地址必须在 server.trusted_proxies 内，转发头才会被解析
+	ippkg.SetTrustedProxies([]string{"127.0.0.1"})
+	t.Cleanup(func() { ippkg.SetTrustedProxies(nil) })
 
 	router := gin.New()
 	// 模拟 SessionBindingContext：开启转发 IP 兼容模式快照
@@ -184,6 +187,42 @@ func TestRateLimiterHonorsForwardedIPSnapshot(t *testing.T) {
 
 	require.Contains(t, callCounts, "rate_limit:fwd:198.51.100.1")
 	require.Contains(t, callCounts, "rate_limit:fwd:198.51.100.2")
+}
+
+// H-1：未配置可信代理时，伪造 X-Forwarded-For 不能拆分限流桶（即使兼容开关打开）。
+func TestRateLimiterIgnoresForgedForwardedForWithoutTrustedProxy(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ippkg.SetTrustedProxies(nil)
+
+	callCounts := make(map[string]int64)
+	originalRun := rateLimitRun
+	rateLimitRun = func(ctx context.Context, client *redis.Client, key string, windowMillis int64) (int64, bool, error) {
+		callCounts[key]++
+		return callCounts[key], false, nil
+	}
+	t.Cleanup(func() { rateLimitRun = originalRun })
+
+	limiter := NewRateLimiter(redis.NewClient(&redis.Options{Addr: "127.0.0.1:1"}))
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		ippkg.SetForwardedIPSettings(c, true, nil)
+		c.Next()
+	})
+	router.Use(limiter.Limit("forged", 1, time.Second))
+	router.GET("/test", func(c *gin.Context) { c.Status(http.StatusOK) })
+
+	send := func(xff string) int {
+		req := httptest.NewRequest(http.MethodGet, "/test", nil)
+		req.RemoteAddr = "203.0.113.77:5678"
+		req.Header.Set("X-Forwarded-For", xff)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		return rec.Code
+	}
+
+	require.Equal(t, http.StatusOK, send("198.51.100.1"))
+	require.Equal(t, http.StatusTooManyRequests, send("198.51.100.2"))
+	require.Equal(t, map[string]int64{"rate_limit:forged:203.0.113.77": 2}, callCounts)
 }
 
 func TestRateLimiterSuccessAndLimit(t *testing.T) {

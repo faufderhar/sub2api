@@ -896,7 +896,7 @@ func TestAPIKeyAuthIPRestrictionUsesTrustedPathWhenSwitchDisabled(t *testing.T) 
 	cfg.SetTrustForwardedIPForAPIKeyACL(false)
 	apiKeyService := service.NewAPIKeyService(apiKeyRepo, nil, nil, nil, nil, nil, cfg)
 	router := gin.New()
-	require.NoError(t, router.SetTrustedProxies(nil))
+	useTrustedProxies(t, router, nil)
 	var markedBusinessLimited bool
 	var businessLimitedReason string
 	router.Use(func(c *gin.Context) {
@@ -958,7 +958,7 @@ func TestAPIKeyAuthIPRestrictionIncludesClientIPForBlacklistDenial(t *testing.T)
 	cfg := &config.Config{RunMode: config.RunModeSimple}
 	apiKeyService := service.NewAPIKeyService(apiKeyRepo, nil, nil, nil, nil, nil, cfg)
 	router := gin.New()
-	require.NoError(t, router.SetTrustedProxies(nil))
+	useTrustedProxies(t, router, nil)
 	router.Use(gin.HandlerFunc(NewAPIKeyAuthMiddleware(apiKeyService, nil, cfg)))
 	router.GET("/t", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"ok": true})
@@ -1007,7 +1007,7 @@ func TestAPIKeyAuthIPRestrictionUsesConfiguredTrustedProxy(t *testing.T) {
 	cfg.SetTrustForwardedIPForAPIKeyACL(false)
 	apiKeyService := service.NewAPIKeyService(apiKeyRepo, nil, nil, nil, nil, nil, cfg)
 	router := gin.New()
-	require.NoError(t, router.SetTrustedProxies([]string{"9.9.9.9"}))
+	useTrustedProxies(t, router, []string{"9.9.9.9"})
 	router.Use(gin.HandlerFunc(NewAPIKeyAuthMiddleware(apiKeyService, nil, cfg)))
 	router.GET("/t", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"ok": true})
@@ -1058,7 +1058,7 @@ func TestAPIKeyAuthIPRestrictionUsesForwardedClientIPInDenialWhenTrusted(t *test
 	cfg.SetTrustForwardedIPForAPIKeyACL(false)
 	apiKeyService := service.NewAPIKeyService(apiKeyRepo, nil, nil, nil, nil, nil, cfg)
 	router := gin.New()
-	require.NoError(t, router.SetTrustedProxies([]string{"9.9.9.9"}))
+	useTrustedProxies(t, router, []string{"9.9.9.9"})
 	router.Use(gin.HandlerFunc(NewAPIKeyAuthMiddleware(apiKeyService, nil, cfg)))
 	router.GET("/t", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"ok": true})
