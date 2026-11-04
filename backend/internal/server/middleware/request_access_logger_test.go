@@ -234,9 +234,7 @@ func TestLogger_AccessLogUsesForwardedClientIPFromTrustedProxy(t *testing.T) {
 	sink := initMiddlewareTestLogger(t)
 
 	r := gin.New()
-	if err := r.SetTrustedProxies([]string{"104.23.251.120"}); err != nil {
-		t.Fatalf("set trusted proxies: %v", err)
-	}
+	useTrustedProxies(t, r, []string{"104.23.251.120"})
 	r.Use(Logger())
 	r.GET("/api/test", func(c *gin.Context) {
 		c.Status(http.StatusOK)

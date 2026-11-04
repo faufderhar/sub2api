@@ -572,7 +572,9 @@ default:
 - `security.response_headers.enabled` - 設定可能なレスポンスヘッダーフィルタリングを有効化（無効時はデフォルトの許可リストを使用）
 - `security.csp` - Content-Security-Policy ヘッダーの制御
 - `billing.circuit_breaker` - 課金エラー時にフェイルクローズ
-- `security.trust_forwarded_ip_for_api_key_acl` - 従来の生転送ヘッダーによる上書きを制御（アップグレード互換性のため既定で有効）。無効にすると `server.trusted_proxies` を厳格に使用し、Sub2API に直接接続するプロキシの正確な CIDR のみを指定
+- `server.trusted_proxies`（`SERVER_TRUSTED_PROXIES`）- Sub2API に直接接続するプロキシ/CDN の正確な CIDR。直接接続元がこの一覧にない場合、転送ヘッダーはすべて無視されます（既定: 空、どのプロキシも信頼しない）
+- `security.trust_forwarded_ip_for_api_key_acl` - 信頼済みプロキシからの要求に限り従来の転送ヘッダー優先順位を使用（既定: `false`）
+- `security.login_lockout.*` - 同一 IP から 15 分以内に 10 回パスワードログインに失敗した「アカウント + IP」を 15 分間ロック（HTTP 429 `LOGIN_LOCKED`、すべて設定可能）
 - `security.forwarded_client_ip_headers` - サードパーティ CDN のクライアント IP ヘッダーを最大 16 個指定。従来モードが有効な場合のみ、設定順で組み込みヘッダーより先に評価
 - `turnstile.required` - リリースモードでの Turnstile 必須化
 

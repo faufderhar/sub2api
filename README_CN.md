@@ -609,7 +609,9 @@ default:
 - `security.response_headers.enabled` 可启用可配置响应头过滤（关闭时使用默认白名单）
 - `security.csp` 配置 Content-Security-Policy
 - `billing.circuit_breaker` 计费异常时 fail-closed
-- `security.trust_forwarded_ip_for_api_key_acl` 控制旧版原始转发头接管（为升级兼容默认开启）；关闭后严格使用 `server.trusted_proxies`，其中只应填写直接连接 Sub2API 的精确代理 CIDR
+- `server.trusted_proxies`（`SERVER_TRUSTED_PROXIES`）填写直接连接 Sub2API 的反代/CDN 精确网段；直连地址不在列表内时忽略所有转发 IP 头（默认空列表，不信任任何代理）
+- `security.trust_forwarded_ip_for_api_key_acl` 仅对可信代理启用旧版转发头优先级（默认 `false`）
+- `security.login_lockout.*` 按「账号 + IP」登录失败锁定：同一 IP 15 分钟内失败 10 次锁定该「账号 + IP」15 分钟（HTTP 429 `LOGIN_LOCKED`，各项可配置）
 - `security.forwarded_client_ip_headers` 最多配置 16 个第三方 CDN 客户端 IP 请求头；仅在旧版接管开启时按顺序优先于内置请求头解析
 - `turnstile.required` 在 release 模式强制启用 Turnstile
 

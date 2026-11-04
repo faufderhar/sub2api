@@ -8,6 +8,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	ippkg "github.com/Wei-Shaw/sub2api/internal/pkg/ip"
+
 	"github.com/gin-gonic/gin"
 )
 
@@ -124,16 +126,18 @@ func recordIngressReject(c *gin.Context, reason IngressRejectReason) {
 	holder.recorder.RecordIngressReject(string(reason), routeFamily, protocol, clientIP, userID, apiKeyID)
 }
 
+// normalizeIngressRejectIP 用于无效鉴权防护的计数键和入口拒绝日志的聚合。
+// 归一化规则统一走 ip.RateLimitKey（IPv4 不变、IPv4-mapped 还原、去掉 zone、IPv6 按 /64 合并），
+// 这里只把 /64 网段写成网络地址（如 "2001:db8:1:2::"），以便写入 inet 列；无法解析时返回 "0.0.0.0"。
 func normalizeIngressRejectIP(raw string) string {
-	addr, err := netip.ParseAddr(strings.TrimSpace(raw))
-	if err != nil {
-		return "0.0.0.0"
+	key := ippkg.RateLimitKey(raw)
+	if prefix, err := netip.ParsePrefix(key); err == nil {
+		return prefix.Masked().Addr().String()
 	}
-	addr = addr.Unmap()
-	if addr.Is6() {
-		return netip.PrefixFrom(addr, 64).Masked().Addr().String()
+	if addr, err := netip.ParseAddr(key); err == nil {
+		return addr.String()
 	}
-	return addr.String()
+	return "0.0.0.0"
 }
 
 func ingressRejectRoute(path string) (string, string) {

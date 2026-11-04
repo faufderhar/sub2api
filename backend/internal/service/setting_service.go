@@ -10,6 +10,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 	"golang.org/x/sync/singleflight"
 	"sync"
@@ -317,6 +318,7 @@ func (s *SettingService) LoadForwardedClientIPSettings(ctx context.Context) erro
 		SettingKeyAPIKeyACLTrustForwardedIP,
 		SettingKeyForwardedClientIPHeaders,
 		settingKeyForwardedClientIPModeV2,
+		settingKeyForwardedIPTrustResetV3,
 	})
 	if err != nil {
 		s.cfg.SetForwardedClientIPSettings(false, nil)
@@ -351,13 +353,24 @@ func (s *SettingService) LoadForwardedClientIPSettings(ctx context.Context) erro
 		updates[SettingKeyForwardedClientIPHeaders] = string(headersJSON)
 	}
 	if values[settingKeyForwardedClientIPModeV2] != "true" {
+		// H-1: the former migration re-enabled raw forwarded-header trust when no
+		// trusted proxies were configured. Forwarded headers are now ignored by
+		// default, so the marker is recorded without flipping the stored value.
 		updates[settingKeyForwardedClientIPModeV2] = "true"
-		// Before this migration, new installations persisted false by default.
-		// Restore compatibility only when no trusted-proxy policy was configured.
-		if headersErr == nil && hasStoredValue && !enabled && !s.cfg.Server.TrustedProxiesConfigured {
-			enabled = true
-			updates[SettingKeyAPIKeyACLTrustForwardedIP] = "true"
+	}
+	if values[settingKeyForwardedIPTrustResetV3] != "true" {
+		// BD-1：旧版本在管理员保存设置页时会把当时的生效值 true 写进 DB，旧迁移还会把
+		// false 改成 true，导致升级后 DB 值覆盖默认 false、H-1 实际不生效。这里做一次性
+		// 重置：存量 true 改为 false，除非配置文件或环境变量显式设为 true。标记写入后不再
+		// 执行，管理员之后在设置页手动打开的值不会被重置。
+		if hasStoredValue && storedValue == "true" && !s.cfg.ForwardedIPTrustExplicitlyEnabled() {
+			updates[SettingKeyAPIKeyACLTrustForwardedIP] = "false"
+			enabled = false
+			logger.LegacyPrintf("service.setting",
+				"Warning: api_key_acl_trust_forwarded_ip was reset from true to false by the one-time upgrade migration; "+
+					"configure server.trusted_proxies for your reverse proxy, and re-enable legacy forwarded-header trust in the settings page only if you really need it")
 		}
+		updates[settingKeyForwardedIPTrustResetV3] = "true"
 	}
 	if len(updates) > 0 {
 		if err := s.settingRepo.SetMultiple(ctx, updates); err != nil {

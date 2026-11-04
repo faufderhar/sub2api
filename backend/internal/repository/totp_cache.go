@@ -16,6 +16,7 @@ const (
 	totpLoginKeyPrefix    = "totp:login:"
 	totpAttemptsKeyPrefix = "totp:attempts:"
 	totpStepUpKeyPrefix   = "totp:stepup:"
+	totpUsedStepKeyPrefix = "totp:used_step:"
 	totpAttemptsTTL       = 15 * time.Minute
 )
 
@@ -168,4 +169,49 @@ func (c *TotpCache) HasStepUpGrant(ctx context.Context, userID int64, sessionKey
 		return false, fmt.Errorf("get step-up grant: %w", err)
 	}
 	return true, nil
+}
+
+// reserveTotpAttemptScript: "increment first, then verify".
+// KEYS[1]=attempts key, ARGV[1]=max attempts, ARGV[2]=window TTL (ms).
+// Returns 1 when an attempt was reserved, 0 when the cap is already reached.
+var reserveTotpAttemptScript = redis.NewScript(`
+local current = tonumber(redis.call('GET', KEYS[1]) or '0')
+if current >= tonumber(ARGV[1]) then
+  return 0
+end
+redis.call('INCR', KEYS[1])
+redis.call('PEXPIRE', KEYS[1], ARGV[2])
+return 1
+`)
+
+// markTotpStepUsedScript records the last consumed TOTP step.
+// KEYS[1]=used-step key, ARGV[1]=step, ARGV[2]=TTL (ms).
+// Returns 1 if the step is newer than the last used one, 0 for a replay.
+var markTotpStepUsedScript = redis.NewScript(`
+local last = redis.call('GET', KEYS[1])
+if last and tonumber(last) >= tonumber(ARGV[1]) then
+  return 0
+end
+redis.call('SET', KEYS[1], ARGV[1], 'PX', ARGV[2])
+return 1
+`)
+
+// ReserveVerifyAttempt atomically reserves one TOTP verification attempt.
+func (c *TotpCache) ReserveVerifyAttempt(ctx context.Context, userID int64, maxAttempts int) (bool, error) {
+	key := fmt.Sprintf("%s%d", totpAttemptsKeyPrefix, userID)
+	res, err := reserveTotpAttemptScript.Run(ctx, c.rdb, []string{key}, maxAttempts, totpAttemptsTTL.Milliseconds()).Int()
+	if err != nil {
+		return false, fmt.Errorf("reserve verify attempt: %w", err)
+	}
+	return res == 1, nil
+}
+
+// MarkCodeStepUsed atomically marks a TOTP step as consumed (anti-replay).
+func (c *TotpCache) MarkCodeStepUsed(ctx context.Context, userID int64, step int64, ttl time.Duration) (bool, error) {
+	key := fmt.Sprintf("%s%d", totpUsedStepKeyPrefix, userID)
+	res, err := markTotpStepUsedScript.Run(ctx, c.rdb, []string{key}, step, ttl.Milliseconds()).Int()
+	if err != nil {
+		return false, fmt.Errorf("mark totp step used: %w", err)
+	}
+	return res == 1, nil
 }

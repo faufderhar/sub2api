@@ -3,7 +3,10 @@ package ip
 
 import (
 	"net"
+	"net/http"
+	"net/netip"
 	"strings"
+	"sync/atomic"
 
 	"github.com/gin-gonic/gin"
 )
@@ -47,21 +50,160 @@ func requestForwardedIPSettings(c *gin.Context) (forwardedIPSettings, bool) {
 
 func requestUsesLegacyForwardedIPTrust(c *gin.Context) bool {
 	settings, ok := requestForwardedIPSettings(c)
-	return !ok || settings.trustForwarded
+	// 安全默认：没有请求级快照时不启用旧版转发头接管。
+	return ok && settings.trustForwarded
 }
 
-// GetClientIP resolves the client address using the legacy forwarding-header
-// precedence used before the trusted-proxy hardening. It remains the
-// compatibility path for request metadata and usage/error logs; security-
-// sensitive callers must use GetTrustedClientIP or GetSecurityClientIP.
-func GetClientIP(c *gin.Context) string {
-	if c == nil {
+// trustedProxyPrefixes 是 server.trusted_proxies 解析后的可信代理网段。
+// 只有直连地址（RemoteAddr）落在这些网段内时，才会解析任何转发头。
+var trustedProxyPrefixes atomic.Pointer[[]netip.Prefix]
+
+// SetTrustedProxies 设置可信代理列表（CIDR 或单个 IP），返回无法解析的条目。
+// 传入空列表表示不信任任何代理：所有转发头都会被忽略，客户端 IP 即直连地址。
+func SetTrustedProxies(entries []string) []string {
+	prefixes := make([]netip.Prefix, 0, len(entries))
+	var invalid []string
+	for _, entry := range entries {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		if strings.Contains(entry, "/") {
+			prefix, err := netip.ParsePrefix(entry)
+			if err != nil {
+				invalid = append(invalid, entry)
+				continue
+			}
+			prefixes = append(prefixes, prefix.Masked())
+			continue
+		}
+		addr, err := netip.ParseAddr(entry)
+		if err != nil {
+			invalid = append(invalid, entry)
+			continue
+		}
+		addr = addr.Unmap()
+		prefixes = append(prefixes, netip.PrefixFrom(addr, addr.BitLen()))
+	}
+	trustedProxyPrefixes.Store(&prefixes)
+	return invalid
+}
+
+// TrustedProxiesConfigured 报告当前是否配置了至少一个可信代理网段。
+func TrustedProxiesConfigured() bool {
+	p := trustedProxyPrefixes.Load()
+	return p != nil && len(*p) > 0
+}
+
+func isTrustedProxyAddr(ipStr string) bool {
+	p := trustedProxyPrefixes.Load()
+	if p == nil || len(*p) == 0 {
+		return false
+	}
+	addr, err := netip.ParseAddr(strings.TrimSpace(ipStr))
+	if err != nil {
+		return false
+	}
+	addr = addr.Unmap().WithZone("")
+	for _, prefix := range *p {
+		if prefix.Contains(addr) {
+			return true
+		}
+	}
+	return false
+}
+
+// remotePeerIP 返回 TCP 直连地址（不含端口）。
+func remotePeerIP(c *gin.Context) string {
+	if c == nil || c.Request == nil {
 		return ""
 	}
-	if !requestUsesLegacyForwardedIPTrust(c) {
-		return GetTrustedClientIP(c)
-	}
+	return normalizeIP(c.Request.RemoteAddr)
+}
 
+// ClientIP 是全项目唯一的"取客户端 IP"入口：IP 白名单/黑名单、限流、审计日志、
+// 会话绑定、请求日志都应通过它（或基于它的 SessionBinding 快照）取值。
+//
+// 规则：
+//  1. 直连地址不在 server.trusted_proxies 内时，忽略所有转发头，直接返回直连地址；
+//  2. 直连地址可信且旧版兼容开关（security.trust_forwarded_ip_for_api_key_acl）
+//     开启时，按旧版优先级解析自定义头、CF-Connecting-IP、X-Real-IP、X-Forwarded-For；
+//  3. 直连地址可信且兼容开关关闭（默认）时，从右往左遍历 X-Forwarded-For，
+//     跳过可信代理，取第一个不可信地址；没有 X-Forwarded-For 时使用 X-Real-IP。
+func ClientIP(c *gin.Context) string {
+	peer := remotePeerIP(c)
+	if peer == "" || !isTrustedProxyAddr(peer) {
+		return peer
+	}
+	if requestUsesLegacyForwardedIPTrust(c) {
+		return legacyForwardedClientIP(c, peer)
+	}
+	if resolved := trustedChainClientIP(c); resolved != "" {
+		return resolved
+	}
+	return peer
+}
+
+// forwardedForChain 把所有 X-Forwarded-For 头行按出现顺序用逗号拼接。
+// HAProxy option forwardfor、部分 Envoy / Go ReverseProxy 会追加一行新的 XFF
+// 而不是合并到已有行；只读第一行会让客户端伪造的值被当作代理写入的值。
+func forwardedForChain(h http.Header) string {
+	values := h.Values("X-Forwarded-For")
+	switch len(values) {
+	case 0:
+		return ""
+	case 1:
+		return values[0]
+	default:
+		return strings.Join(values, ",")
+	}
+}
+
+// singleValueForwardedHeader 返回单值转发头（X-Real-IP、CF-Connecting-IP 等）的值。
+// 这类头按约定只应出现一次；出现多行说明客户端自带了一份、代理又追加了一份，
+// 无法判断哪一行可信，因此整体视为不可信（返回空）。
+func singleValueForwardedHeader(h http.Header, name string) string {
+	values := h.Values(name)
+	if len(values) != 1 {
+		return ""
+	}
+	return values[0]
+}
+
+// trustedChainClientIP 与 Gin 的 ClientIP 语义一致：依次检查 X-Forwarded-For（多行按顺序拼接）、
+// X-Real-IP（多行视为不可信），从右往左跳过可信代理，返回第一个不可信地址；遇到非法值时放弃该请求头。
+func trustedChainClientIP(c *gin.Context) string {
+	for _, header := range []string{"X-Forwarded-For", "X-Real-IP"} {
+		var value string
+		if header == "X-Forwarded-For" {
+			value = forwardedForChain(c.Request.Header)
+		} else {
+			value = singleValueForwardedHeader(c.Request.Header, header)
+		}
+		if strings.TrimSpace(value) == "" {
+			continue
+		}
+		items := strings.Split(value, ",")
+		resolved := ""
+		for i := len(items) - 1; i >= 0; i-- {
+			candidate := normalizeValidIP(items[i])
+			if candidate == "" {
+				resolved = ""
+				break
+			}
+			resolved = candidate
+			if !isTrustedProxyAddr(candidate) {
+				break
+			}
+		}
+		if resolved != "" {
+			return resolved
+		}
+	}
+	return ""
+}
+
+func legacyForwardedClientIP(c *gin.Context, peer string) string {
 	settings, _ := requestForwardedIPSettings(c)
 	customIP, customFallback := resolveCustomForwardedClientIP(c, settings.headers)
 	if customIP != "" {
@@ -82,7 +224,15 @@ func GetClientIP(c *gin.Context) string {
 	if legacyFallback != "" {
 		return legacyFallback
 	}
-	return normalizeIP(c.ClientIP())
+	return peer
+}
+
+// GetClientIP is kept for existing callers; it is identical to ClientIP.
+func GetClientIP(c *gin.Context) string {
+	if c == nil {
+		return ""
+	}
+	return ClientIP(c)
 }
 
 func resolveCustomForwardedClientIP(c *gin.Context, headers []string) (string, string) {
@@ -113,13 +263,13 @@ func resolveCustomForwardedClientIP(c *gin.Context, headers []string) (string, s
 
 func resolveLegacyForwardedHeaderIP(c *gin.Context) (string, string) {
 	var fallback string
-	if forwarded := normalizeValidIP(c.GetHeader("CF-Connecting-IP")); forwarded != "" {
+	if forwarded := normalizeValidIP(singleValueForwardedHeader(c.Request.Header, "CF-Connecting-IP")); forwarded != "" {
 		fallback = forwarded
 		if !isPrivateIP(forwarded) {
 			return forwarded, fallback
 		}
 	}
-	if realIP := normalizeValidIP(c.GetHeader("X-Real-IP")); realIP != "" {
+	if realIP := normalizeValidIP(singleValueForwardedHeader(c.Request.Header, "X-Real-IP")); realIP != "" {
 		if fallback == "" {
 			fallback = realIP
 		}
@@ -127,7 +277,7 @@ func resolveLegacyForwardedHeaderIP(c *gin.Context) (string, string) {
 			return realIP, fallback
 		}
 	}
-	if xff := c.GetHeader("X-Forwarded-For"); xff != "" {
+	if xff := forwardedForChain(c.Request.Header); xff != "" {
 		ips := strings.Split(xff, ",")
 		for _, candidate := range ips {
 			candidate = normalizeValidIP(candidate)
@@ -147,28 +297,23 @@ func resolveLegacyForwardedHeaderIP(c *gin.Context) (string, string) {
 	return "", fallback
 }
 
-// GetTrustedClientIP 从 Gin 的可信代理解析链提取客户端 IP。
-// 该方法依赖 gin.Engine.SetTrustedProxies 配置，不会优先直接信任原始转发头值。
-// 适用于 ACL / 风控等安全敏感场景。
+// GetTrustedClientIP is kept for existing callers; it is identical to ClientIP.
 func GetTrustedClientIP(c *gin.Context) string {
 	if c == nil {
 		return ""
 	}
-	return normalizeIP(c.ClientIP())
+	return ClientIP(c)
 }
 
-// GetSecurityClientIP returns the address used by security-sensitive paths.
-// When legacy forwarded-IP trust is enabled, raw forwarding headers take over
-// client-IP resolution. When disabled, Gin's server.trusted_proxies chain is
-// authoritative.
-func GetSecurityClientIP(c *gin.Context, trustForwarded bool) string {
-	if requestSettings, ok := requestForwardedIPSettings(c); ok {
-		trustForwarded = requestSettings.trustForwarded
+// GetSecurityClientIP is kept for existing callers; it is identical to ClientIP.
+// The trustForwarded argument is ignored: the per-request snapshot written by
+// SetForwardedIPSettings (SessionBindingContext) is authoritative, and
+// forwarded headers are only honoured when the direct peer is a trusted proxy.
+func GetSecurityClientIP(c *gin.Context, _ bool) string {
+	if c == nil {
+		return ""
 	}
-	if trustForwarded {
-		return GetClientIP(c)
-	}
-	return GetTrustedClientIP(c)
+	return ClientIP(c)
 }
 
 // normalizeIP 规范化 IP 地址，去除端口号和空格。
@@ -375,4 +520,50 @@ func ValidateIPPatterns(patterns []string) []string {
 		}
 	}
 	return invalid
+}
+
+// DefaultRateLimitIPv6PrefixBits 是限流、登录锁定等「按 IP 计数」场景合并 IPv6 地址时使用的前缀长度。
+// 运营商和云厂商通常给一个用户（一台机器）分配整个 /64，按单个地址计数时，换地址就能绕过。
+const DefaultRateLimitIPv6PrefixBits = 64
+
+// RateLimitKey 把 ClientIP 的结果归一化成「按 IP 计数」用的键：
+//   - IPv4 原样返回（规范化书写）；
+//   - IPv4-mapped IPv6（::ffff:a.b.c.d）还原成 IPv4，和直接用 IPv4 连接的同一客户端共用计数；
+//   - IPv6 去掉 zone（fe80::1%eth0），按 /64 合并，返回网段写法，例如 "2001:db8:1:2::/64"；
+//   - 无法解析的值（包括空串）去掉首尾空白后原样返回。
+//
+// 只用于限流和锁定的计数键。审计日志、IP 白名单、会话绑定等仍使用 ClientIP 返回的完整地址。
+func RateLimitKey(clientIP string) string {
+	return RateLimitKeyWithPrefix(clientIP, DefaultRateLimitIPv6PrefixBits)
+}
+
+// RateLimitKeyWithPrefix 同 RateLimitKey，但可以指定 IPv6 合并前缀；bits 不在 1..127 时按单个地址计数。
+func RateLimitKeyWithPrefix(clientIP string, ipv6PrefixBits int) string {
+	raw := strings.TrimSpace(clientIP)
+	if raw == "" {
+		return ""
+	}
+	host := raw
+	if strings.HasPrefix(host, "[") && strings.HasSuffix(host, "]") {
+		host = host[1 : len(host)-1]
+	}
+	addr, err := netip.ParseAddr(host)
+	if err != nil {
+		return raw
+	}
+	addr = addr.WithZone("")
+	if addr.Is4In6() {
+		addr = addr.Unmap()
+	}
+	if addr.Is4() {
+		return addr.String()
+	}
+	if ipv6PrefixBits <= 0 || ipv6PrefixBits >= 128 {
+		return addr.String()
+	}
+	prefix, err := addr.Prefix(ipv6PrefixBits)
+	if err != nil {
+		return addr.String()
+	}
+	return prefix.String()
 }

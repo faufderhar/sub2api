@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"net/netip"
 	"strconv"
 	"time"
 
@@ -26,7 +25,9 @@ const (
 // RateLimitOptions 限流可选配置
 type RateLimitOptions struct {
 	FailureMode RateLimitFailureMode
-	// IPv6PrefixBits 按网段（如 64）合并 IPv6 客户端计数，避免轮换同一分配内的地址绕过限流；0 表示按单个地址计数。
+	// IPv6PrefixBits 合并 IPv6 客户端计数使用的前缀长度。0 表示默认值 /64（ip.DefaultRateLimitIPv6PrefixBits），
+	// 避免轮换同一分配内的地址绕过限流；1..127 为自定义前缀；>=128 表示按单个地址计数。
+	// IPv4 和 IPv4-mapped IPv6 不受影响，统一按 IPv4 地址计数。
 	IPv6PrefixBits int
 }
 
@@ -112,31 +113,20 @@ func (r *RateLimiter) Allow(ctx context.Context, key string, limit int, window t
 }
 
 // clientIPForRateLimit 返回 IP 维度限流使用的客户端地址。
-// 与审计日志/会话绑定/API Key IP ACL 共用同一套安全客户端 IP 解析
-// （SessionBindingContext 快照：兼容开关开启时信任反代转发头，关闭时走
-// server.trusted_proxies 可信链）。避免默认反代部署下 Gin ClientIP 恒等于
-// 代理地址、所有用户坍缩进同一个限流桶造成整体误拦截。
+// 与审计日志/会话绑定/API Key IP ACL 共用同一个取 IP 函数 ip.ClientIP：
+// 只有直连地址属于 server.trusted_proxies 时才解析转发头，伪造的
+// X-Forwarded-For 无法用来轮换限流桶。
 func clientIPForRateLimit(c *gin.Context) string {
-	if resolved := ippkg.GetSecurityClientIP(c, false); resolved != "" {
-		return resolved
-	}
-	return c.ClientIP()
+	return ippkg.ClientIP(c)
 }
 
-// rateLimitClientKey 把 IPv6 地址归并到指定前缀的网段；IPv4 与无法解析的值保持原样。
+// rateLimitClientKey 返回限流计数用的客户端键，统一走 ip.RateLimitKey：
+// IPv6 默认按 /64 合并，IPv4 / IPv4-mapped 按 IPv4 地址计数。
 func rateLimitClientKey(ip string, ipv6PrefixBits int) string {
-	if ipv6PrefixBits <= 0 || ipv6PrefixBits >= 128 {
-		return ip
+	if ipv6PrefixBits == 0 {
+		return ippkg.RateLimitKey(ip)
 	}
-	addr, err := netip.ParseAddr(ip)
-	if err != nil || !addr.Is6() || addr.Is4In6() {
-		return ip
-	}
-	prefix, err := addr.WithZone("").Prefix(ipv6PrefixBits)
-	if err != nil {
-		return ip
-	}
-	return prefix.String()
+	return ippkg.RateLimitKeyWithPrefix(ip, ipv6PrefixBits)
 }
 
 // Limit 返回速率限制中间件

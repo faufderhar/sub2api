@@ -471,18 +471,28 @@ func (s *AuthService) ValidatePasswordCredentials(ctx context.Context, email, pa
 		return nil, ErrServiceUnavailable
 	}
 
+	// 与密码登录共享按「账号 + IP」的失败计数和锁定（同样先占用尝试再校验），避免通过该入口绕过锁定爆破密码。
+	lockoutSubjects, err := s.reserveLoginAttempt(ctx, email)
+	if err != nil {
+		return nil, err
+	}
+
 	user, err := s.userRepo.GetByEmail(ctx, strings.TrimSpace(strings.ToLower(email)))
 	if err != nil {
 		if errors.Is(err, ErrUserNotFound) {
-			return nil, ErrInvalidCredentials
+			// BD-5：账号不存在也跑一次同成本 bcrypt，耗时与密码错误路径一致
+			s.equalizePasswordCheckTiming(password)
+			return nil, s.recordLoginFailure(ctx, lockoutSubjects, ErrInvalidCredentials)
 		}
 		return nil, ErrServiceUnavailable
 	}
+	// 与 Login 一致：先校验密码再判断账号状态，避免不带正确密码就能探测账号存在/禁用状态。
+	if !s.CheckPassword(password, user.PasswordHash) {
+		return nil, s.recordLoginFailure(ctx, lockoutSubjects, ErrInvalidCredentials)
+	}
+	s.resetLoginFailures(ctx, lockoutSubjects)
 	if !user.IsActive() {
 		return nil, ErrUserNotActive
-	}
-	if !s.CheckPassword(password, user.PasswordHash) {
-		return nil, ErrInvalidCredentials
 	}
 	return user, nil
 }

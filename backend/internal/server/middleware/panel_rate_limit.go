@@ -10,6 +10,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/adminaccess"
+	ippkg "github.com/Wei-Shaw/sub2api/internal/pkg/ip"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -149,7 +150,7 @@ func (p *PanelRateLimiter) PublicIP() gin.HandlerFunc {
 			return
 		}
 
-		result, err := p.limiter.Allow(c.Request.Context(), "panel:public:ip:"+clientIP, settings.PublicIPRPM, panelRateLimitWindow)
+		result, err := p.limiter.Allow(c.Request.Context(), "panel:public:ip:"+ippkg.RateLimitKey(clientIP), settings.PublicIPRPM, panelRateLimitWindow)
 		if err != nil {
 			slog.Warn("panel public rate limit check failed, allowing request", "error", err)
 			c.Next()

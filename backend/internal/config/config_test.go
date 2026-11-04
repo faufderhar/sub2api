@@ -142,7 +142,15 @@ func TestLoadHTTPIngressSafetyDefaults(t *testing.T) {
 	require.Equal(t, 64*1024, cfg.Server.MaxHeaderBytes)
 	require.Empty(t, cfg.Server.TrustedProxies)
 	require.False(t, cfg.Server.TrustedProxiesConfigured)
-	require.True(t, cfg.TrustForwardedIPForAPIKeyACL())
+	// H-1：默认不信任转发头
+	require.False(t, cfg.TrustForwardedIPForAPIKeyACL())
+	require.True(t, cfg.Security.LoginLockout.Enabled)
+	require.Equal(t, 10, cfg.Security.LoginLockout.MaxFailures)
+	require.Equal(t, 900, cfg.Security.LoginLockout.WindowSeconds)
+	require.Equal(t, 900, cfg.Security.LoginLockout.LockoutSeconds)
+	require.Equal(t, int64(1<<20), cfg.Server.APIMaxRequestBodySize)
+	require.Equal(t, 30, cfg.Server.APIReadTimeout)
+	require.Equal(t, 600, cfg.Server.APILargeBodyReadTimeout)
 	require.Equal(t, int64(32*1024*1024), cfg.Gateway.TextMaxBodySize)
 	require.True(t, cfg.APIKeyAuth.InvalidAbuse.Enabled)
 	require.Equal(t, 120, cfg.APIKeyAuth.InvalidAbuse.Threshold)
@@ -2738,4 +2746,57 @@ func TestLoadSimpleModeAutoCreateDefaultGroups(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestLoadLoginLockoutFromEnv(t *testing.T) {
+	resetViperWithJWTSecret(t)
+	t.Setenv("SECURITY_LOGIN_LOCKOUT_ENABLED", "true")
+	t.Setenv("SECURITY_LOGIN_LOCKOUT_MAX_FAILURES", "5")
+	t.Setenv("SECURITY_LOGIN_LOCKOUT_WINDOW_SECONDS", "60")
+	t.Setenv("SECURITY_LOGIN_LOCKOUT_LOCKOUT_SECONDS", "120")
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.Equal(t, 5, cfg.Security.LoginLockout.MaxFailures)
+	require.Equal(t, 60, cfg.Security.LoginLockout.WindowSeconds)
+	require.Equal(t, 120, cfg.Security.LoginLockout.LockoutSeconds)
+}
+
+func TestValidateRejectsInvalidLoginLockout(t *testing.T) {
+	resetViperWithJWTSecret(t)
+	t.Setenv("SECURITY_LOGIN_LOCKOUT_MAX_FAILURES", "0")
+	_, err := Load()
+	require.ErrorContains(t, err, "security.login_lockout.max_failures")
+}
+
+func TestLoadAPIBodyLimitFromEnv(t *testing.T) {
+	resetViperWithJWTSecret(t)
+	t.Setenv("SERVER_API_MAX_REQUEST_BODY_SIZE", "2097152")
+	t.Setenv("SERVER_API_READ_TIMEOUT", "15")
+	t.Setenv("SERVER_API_LARGE_BODY_READ_TIMEOUT", "120")
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.Equal(t, int64(2<<20), cfg.Server.APIMaxRequestBodySize)
+	require.Equal(t, 15, cfg.Server.APIReadTimeout)
+	require.Equal(t, 120, cfg.Server.APILargeBodyReadTimeout)
+}
+
+func TestValidateRejectsInvalidAPIBodyLimit(t *testing.T) {
+	cases := map[string]string{
+		"SERVER_API_MAX_REQUEST_BODY_SIZE": "0",
+		"SERVER_API_READ_TIMEOUT":          "0",
+	}
+	for env, val := range cases {
+		t.Run(env, func(t *testing.T) {
+			resetViperWithJWTSecret(t)
+			t.Setenv(env, val)
+			_, err := Load()
+			require.Error(t, err)
+		})
+	}
+	t.Run("exceeds global", func(t *testing.T) {
+		resetViperWithJWTSecret(t)
+		t.Setenv("SERVER_MAX_REQUEST_BODY_SIZE", "1024")
+		_, err := Load()
+		require.ErrorContains(t, err, "server.api_max_request_body_size must not exceed")
+	})
 }

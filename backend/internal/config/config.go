@@ -739,16 +739,19 @@ type PricingConfig struct {
 type ServerConfig struct {
 	Host                     string    `mapstructure:"host"`
 	Port                     int       `mapstructure:"port"`
-	Mode                     string    `mapstructure:"mode"`                  // debug/release
-	EnableServerTiming       bool      `mapstructure:"enable_server_timing"`  // Admin UI Server-Timing response header
-	FrontendURL              string    `mapstructure:"frontend_url"`          // 前端基础 URL，用于生成邮件中的外部链接
-	ReadHeaderTimeout        int       `mapstructure:"read_header_timeout"`   // 读取请求头超时（秒）
-	MaxHeaderBytes           int       `mapstructure:"max_header_bytes"`      // 请求头最大字节数（HTTP/2 映射为 header-list 上限）
-	IdleTimeout              int       `mapstructure:"idle_timeout"`          // 空闲连接超时（秒）
-	TrustedProxies           []string  `mapstructure:"trusted_proxies"`       // 可信代理列表（CIDR/IP）
-	TrustedProxiesConfigured bool      `mapstructure:"-" json:"-" yaml:"-"`   // 是否显式配置了可信代理列表
-	MaxRequestBodySize       int64     `mapstructure:"max_request_body_size"` // 全局最大请求体限制
-	H2C                      H2CConfig `mapstructure:"h2c"`                   // HTTP/2 Cleartext 配置
+	Mode                     string    `mapstructure:"mode"`                        // debug/release
+	EnableServerTiming       bool      `mapstructure:"enable_server_timing"`        // Admin UI Server-Timing response header
+	FrontendURL              string    `mapstructure:"frontend_url"`                // 前端基础 URL，用于生成邮件中的外部链接
+	ReadHeaderTimeout        int       `mapstructure:"read_header_timeout"`         // 读取请求头超时（秒）
+	MaxHeaderBytes           int       `mapstructure:"max_header_bytes"`            // 请求头最大字节数（HTTP/2 映射为 header-list 上限）
+	IdleTimeout              int       `mapstructure:"idle_timeout"`                // 空闲连接超时（秒）
+	TrustedProxies           []string  `mapstructure:"trusted_proxies"`             // 可信代理列表（CIDR/IP）
+	TrustedProxiesConfigured bool      `mapstructure:"-" json:"-" yaml:"-"`         // 是否显式配置了可信代理列表
+	MaxRequestBodySize       int64     `mapstructure:"max_request_body_size"`       // 全局最大请求体限制
+	APIMaxRequestBodySize    int64     `mapstructure:"api_max_request_body_size"`   // 非网关路由请求体上限（默认 1MB，白名单路由使用 MaxRequestBodySize）
+	APIReadTimeout           int       `mapstructure:"api_read_timeout"`            // 非网关路由请求体读取超时（秒），仅读取请求体期间生效
+	APILargeBodyReadTimeout  int       `mapstructure:"api_large_body_read_timeout"` // 大请求体白名单路由的请求体读取超时（秒）
+	H2C                      H2CConfig `mapstructure:"h2c"`                         // HTTP/2 Cleartext 配置
 }
 
 // H2CConfig HTTP/2 Cleartext 配置
@@ -791,10 +794,37 @@ type SecurityConfig struct {
 	ProxyProbe      ProxyProbeConfig     `mapstructure:"proxy_probe"`
 	// TrustForwardedIPForAPIKeyACL enables legacy raw forwarded-header takeover.
 	// When disabled, server.trusted_proxies is authoritative for all client-IP consumers.
-	TrustForwardedIPForAPIKeyACL  bool                                       `mapstructure:"trust_forwarded_ip_for_api_key_acl"`
-	ForwardedClientIPHeaders      []string                                   `mapstructure:"forwarded_client_ip_headers" json:"forwarded_client_ip_headers" yaml:"forwarded_client_ip_headers"`
+	TrustForwardedIPForAPIKeyACL bool `mapstructure:"trust_forwarded_ip_for_api_key_acl"`
+	// TrustForwardedIPForAPIKeyACLExplicit 配置文件或环境变量
+	// （SECURITY_TRUST_FORWARDED_IP_FOR_API_KEY_ACL）显式写了该项；只用于 BD-1 一次性迁移判断。
+	TrustForwardedIPForAPIKeyACLExplicit bool     `mapstructure:"-" yaml:"-"`
+	ForwardedClientIPHeaders             []string `mapstructure:"forwarded_client_ip_headers" json:"forwarded_client_ip_headers" yaml:"forwarded_client_ip_headers"`
+	// LoginLockout 按「账号（登录邮箱）+ 客户端 IP」计数的密码登录失败锁定。
+	LoginLockout                  LoginLockoutConfig                         `mapstructure:"login_lockout"`
 	forwardedClientIPSettingsLive *atomic.Pointer[ForwardedClientIPSettings] `mapstructure:"-" json:"-" yaml:"-"`
 }
+
+// LoginLockoutConfig 按「账号 + 客户端 IP」的登录失败锁定配置。
+// 同一 IP 在 WindowSeconds 内累计失败 MaxFailures 次后，该「账号 + IP」锁定 LockoutSeconds 秒；
+// 锁定期间即使密码正确也拒绝登录，到期自动解锁。账号是否存在不影响计数和返回结果。
+type LoginLockoutConfig struct {
+	Enabled        bool `mapstructure:"enabled"`
+	MaxFailures    int  `mapstructure:"max_failures"`
+	WindowSeconds  int  `mapstructure:"window_seconds"`
+	LockoutSeconds int  `mapstructure:"lockout_seconds"`
+}
+
+const (
+	DefaultAPIMaxRequestBodySize          = 1 << 20 // 1MB
+	DefaultAPIReadTimeoutSeconds          = 30
+	DefaultAPILargeBodyReadTimeoutSeconds = 600
+)
+
+const (
+	DefaultLoginLockoutMaxFailures    = 10
+	DefaultLoginLockoutWindowSeconds  = 15 * 60
+	DefaultLoginLockoutLockoutSeconds = 15 * 60
+)
 
 func NormalizeForwardedClientIPHeaders(headers []string) ([]string, error) {
 	normalized := make([]string, 0, len(headers))
@@ -842,6 +872,12 @@ func (c *Config) ForwardedClientIPSettings() ForwardedClientIPSettings {
 		TrustForwardedIP: c.Security.TrustForwardedIPForAPIKeyACL,
 		Headers:          cloneForwardedClientIPHeaders(c.Security.ForwardedClientIPHeaders),
 	}
+}
+
+// ForwardedIPTrustExplicitlyEnabled 配置文件或环境变量显式把
+// security.trust_forwarded_ip_for_api_key_acl 设为 true。
+func (c *Config) ForwardedIPTrustExplicitlyEnabled() bool {
+	return c != nil && c.Security.TrustForwardedIPForAPIKeyACLExplicit && c.Security.TrustForwardedIPForAPIKeyACL
 }
 
 func (c *Config) TrustForwardedIPForAPIKeyACL() bool {
@@ -1977,6 +2013,8 @@ func load(allowMissingJWTSecret bool) (*Config, error) {
 	cfg.OIDC.UserInfoIDPath = strings.TrimSpace(cfg.OIDC.UserInfoIDPath)
 	cfg.OIDC.UserInfoUsernamePath = strings.TrimSpace(cfg.OIDC.UserInfoUsernamePath)
 	cfg.OIDC.UsePKCEExplicit = hasExplicitConfigOrEnv("oidc_connect.use_pkce", "OIDC_CONNECT_USE_PKCE")
+	cfg.Security.TrustForwardedIPForAPIKeyACLExplicit = hasExplicitConfigOrEnv(
+		"security.trust_forwarded_ip_for_api_key_acl", "SECURITY_TRUST_FORWARDED_IP_FOR_API_KEY_ACL")
 	cfg.OIDC.ValidateIDTokenExplicit = hasExplicitConfigOrEnv("oidc_connect.validate_id_token", "OIDC_CONNECT_VALIDATE_ID_TOKEN")
 	cfg.Dashboard.KeyPrefix = strings.TrimSpace(cfg.Dashboard.KeyPrefix)
 	cfg.CORS.AllowedOrigins = normalizeStringSlice(cfg.CORS.AllowedOrigins)
@@ -2105,6 +2143,10 @@ func setDefaults() {
 	viper.SetDefault("server.max_header_bytes", 64*1024)
 	viper.SetDefault("server.idle_timeout", 120) // 120秒空闲超时
 	viper.SetDefault("server.max_request_body_size", int64(256*1024*1024))
+	// M-1：非网关路由默认 1MB 请求体上限与请求体读取超时
+	viper.SetDefault("server.api_max_request_body_size", int64(DefaultAPIMaxRequestBodySize))
+	viper.SetDefault("server.api_read_timeout", DefaultAPIReadTimeoutSeconds)
+	viper.SetDefault("server.api_large_body_read_timeout", DefaultAPILargeBodyReadTimeoutSeconds)
 	// H2C 默认配置
 	viper.SetDefault("server.h2c.enabled", false)
 	viper.SetDefault("server.h2c.max_concurrent_streams", uint32(50))      // 50 个并发流
@@ -2173,7 +2215,14 @@ func setDefaults() {
 	viper.SetDefault("security.csp.enabled", true)
 	viper.SetDefault("security.csp.policy", DefaultCSPPolicy)
 	viper.SetDefault("security.proxy_probe.insecure_skip_verify", false)
-	viper.SetDefault("security.trust_forwarded_ip_for_api_key_acl", true)
+	// H-1：默认不信任客户端提供的转发头。部署在 Nginx/CDN 后面时请配置
+	// server.trusted_proxies（SERVER_TRUSTED_PROXIES），而不是打开此兼容开关。
+	viper.SetDefault("security.trust_forwarded_ip_for_api_key_acl", false)
+	// H-1：按「账号 + IP」的登录失败锁定（默认 15 分钟内失败 10 次，锁定 15 分钟）
+	viper.SetDefault("security.login_lockout.enabled", true)
+	viper.SetDefault("security.login_lockout.max_failures", DefaultLoginLockoutMaxFailures)
+	viper.SetDefault("security.login_lockout.window_seconds", DefaultLoginLockoutWindowSeconds)
+	viper.SetDefault("security.login_lockout.lockout_seconds", DefaultLoginLockoutLockoutSeconds)
 
 	// Security - disable direct fallback on proxy error
 	viper.SetDefault("security.proxy_fallback.allow_direct_on_error", false)
@@ -2775,6 +2824,17 @@ func (c *Config) Validate() error {
 	}
 	c.Security.ForwardedClientIPHeaders = forwardedClientIPHeaders
 	c.SetForwardedClientIPSettings(c.Security.TrustForwardedIPForAPIKeyACL, forwardedClientIPHeaders)
+	if c.Security.LoginLockout.Enabled {
+		if c.Security.LoginLockout.MaxFailures <= 0 {
+			return fmt.Errorf("security.login_lockout.max_failures must be positive")
+		}
+		if c.Security.LoginLockout.WindowSeconds <= 0 {
+			return fmt.Errorf("security.login_lockout.window_seconds must be positive")
+		}
+		if c.Security.LoginLockout.LockoutSeconds <= 0 {
+			return fmt.Errorf("security.login_lockout.lockout_seconds must be positive")
+		}
+	}
 	proxyProbeURLs, err := normalizeProxyProbeURLs(c.Security.ProxyProbe.URLs)
 	if err != nil {
 		return fmt.Errorf("security.proxy_probe.urls: %w", err)
@@ -2800,6 +2860,18 @@ func (c *Config) Validate() error {
 	}
 	if c.Server.MaxRequestBodySize < 0 {
 		return fmt.Errorf("server.max_request_body_size must be non-negative")
+	}
+	if c.Server.APIMaxRequestBodySize <= 0 {
+		return fmt.Errorf("server.api_max_request_body_size must be positive")
+	}
+	if c.Server.MaxRequestBodySize > 0 && c.Server.APIMaxRequestBodySize > c.Server.MaxRequestBodySize {
+		return fmt.Errorf("server.api_max_request_body_size must not exceed server.max_request_body_size")
+	}
+	if c.Server.APIReadTimeout < 1 || c.Server.APIReadTimeout > 3600 {
+		return fmt.Errorf("server.api_read_timeout must be between 1 and 3600 seconds")
+	}
+	if c.Server.APILargeBodyReadTimeout < 1 || c.Server.APILargeBodyReadTimeout > 3600 {
+		return fmt.Errorf("server.api_large_body_read_timeout must be between 1 and 3600 seconds")
 	}
 	if c.Server.H2C.Enabled {
 		if c.Server.H2C.MaxConcurrentStreams == 0 {

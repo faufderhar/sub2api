@@ -48,3 +48,10 @@ func TestLoggerRecordsIngressRejectOnce(t *testing.T) {
 	require.Equal(t, "2001:db8:abcd:1234::", recorder.clientIP)
 	recorder.mu.Unlock()
 }
+
+func TestNormalizeIngressRejectIPUsesRateLimitKey(t *testing.T) {
+	require.Equal(t, "fe80::", normalizeIngressRejectIP("fe80::1%eth0"), "zone is dropped before /64 grouping")
+	require.Equal(t, "203.0.113.9", normalizeIngressRejectIP(" 203.0.113.9 "))
+	require.Equal(t, "2001:db8:1:2::", normalizeIngressRejectIP("[2001:db8:1:2::77]"))
+	require.Equal(t, "0.0.0.0", normalizeIngressRejectIP(""))
+}

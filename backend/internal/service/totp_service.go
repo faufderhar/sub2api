@@ -9,6 +9,8 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/pquerna/otp"
+	"github.com/pquerna/otp/hotp"
 	"github.com/pquerna/otp/totp"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
@@ -41,6 +43,15 @@ type TotpCache interface {
 	IncrementVerifyAttempts(ctx context.Context, userID int64) (int, error)
 	GetVerifyAttempts(ctx context.Context, userID int64) (int, error)
 	ClearVerifyAttempts(ctx context.Context, userID int64) error
+	// ReserveVerifyAttempt atomically reserves one verification attempt before the
+	// code is checked ("increment first, then verify"). It returns allowed=false
+	// once maxAttempts attempts have been reserved inside the attempt window, so
+	// concurrent requests can never evaluate more than maxAttempts codes.
+	ReserveVerifyAttempt(ctx context.Context, userID int64, maxAttempts int) (allowed bool, err error)
+	// MarkCodeStepUsed atomically records that the TOTP time step was consumed.
+	// It returns false when this step (or a later one) was already used, which
+	// rejects replays of a code inside its validity window.
+	MarkCodeStepUsed(ctx context.Context, userID int64, step int64, ttl time.Duration) (bool, error)
 
 	// Step-up grant methods (敏感操作 sudo 窗口)
 	SetStepUpGrant(ctx context.Context, userID int64, sessionKey string, ttl time.Duration) error
@@ -93,6 +104,12 @@ const (
 	totpLoginTTL    = 5 * time.Minute
 	totpAttemptsTTL = 15 * time.Minute
 	maxTotpAttempts = 5
+	// totpPeriodSeconds / totpSkewSteps mirror totp.Validate defaults (30s, ±1 step).
+	totpPeriodSeconds = 30
+	totpSkewSteps     = 1
+	// totpUsedStepTTL keeps the last used step long enough to cover the whole
+	// validity window (current step ± skew) with margin.
+	totpUsedStepTTL = 5 * time.Minute
 	totpIssuer      = "Sub2API"
 )
 
@@ -334,9 +351,15 @@ func (s *TotpService) VerifyCode(ctx context.Context, userID int64, code string)
 		"user_id", userID,
 		"code_len", len(code))
 
-	// Check rate limiting
-	attempts, err := s.cache.GetVerifyAttempts(ctx, userID)
-	if err == nil && attempts >= maxTotpAttempts {
+	// Reserve an attempt atomically before checking the code ("increment first,
+	// then verify"), so concurrent guesses can never exceed maxTotpAttempts.
+	// Fail closed: if the attempt store is unavailable the code is not checked.
+	allowed, err := s.cache.ReserveVerifyAttempt(ctx, userID, maxTotpAttempts)
+	if err != nil {
+		slog.Warn("totp_verify_reserve_attempt_failed", "user_id", userID, "error", err)
+		return ErrServiceUnavailable
+	}
+	if !allowed {
 		return ErrTotpTooManyAttempts
 	}
 
@@ -379,18 +402,30 @@ func (s *TotpService) VerifyCode(ctx context.Context, userID int64, code string)
 		"secret_len", len(secret),
 		"secret_prefix", secretPrefix)
 
-	// Verify the code
-	valid := totp.Validate(code, secret)
+	// Verify the code (same parameters as totp.Validate) and learn which time step matched.
+	now := time.Now().UTC()
+	step, valid := matchTotpStep(code, secret, now)
 	slog.Debug("totp_verify_result",
 		"user_id", userID,
 		"valid", valid,
 		"secret_len", len(secret),
 		"secret_prefix", secretPrefix,
-		"server_time", time.Now().UTC().Format(time.RFC3339))
+		"server_time", now.Format(time.RFC3339))
 
 	if !valid {
-		// Increment failed attempts
-		_, _ = s.cache.IncrementVerifyAttempts(ctx, userID)
+		// The attempt was already counted by ReserveVerifyAttempt.
+		return ErrTotpInvalidCode
+	}
+
+	// Anti-replay: a step can be consumed once; a code from a step that is not
+	// newer than the last successfully used one is rejected.
+	firstUse, err := s.cache.MarkCodeStepUsed(ctx, userID, step, totpUsedStepTTL)
+	if err != nil {
+		slog.Warn("totp_verify_mark_used_failed", "user_id", userID, "error", err)
+		return ErrServiceUnavailable
+	}
+	if !firstUse {
+		slog.Info("totp_verify_replay_rejected", "user_id", userID)
 		return ErrTotpInvalidCode
 	}
 
@@ -398,6 +433,26 @@ func (s *TotpService) VerifyCode(ctx context.Context, userID int64, code string)
 	_ = s.cache.ClearVerifyAttempts(ctx, userID)
 
 	return nil
+}
+
+// matchTotpStep validates code against secret for the current step ± totpSkewSteps
+// using the same primitive and parameters as totp.Validate (HOTP/SHA1, 6 digits,
+// 30s period) and returns the matched time-step counter.
+func matchTotpStep(code, secret string, now time.Time) (int64, bool) {
+	current := now.Unix() / totpPeriodSeconds
+	opts := hotp.ValidateOpts{Digits: otp.DigitsSix, Algorithm: otp.AlgorithmSHA1}
+	// Same order as totp.ValidateCustom: current step first, then ±1 (totpSkewSteps).
+	for _, offset := range []int64{0, totpSkewSteps, -totpSkewSteps} {
+		step := current + offset
+		ok, err := hotp.ValidateCustom(code, uint64(step), secret, opts)
+		if err != nil {
+			return 0, false
+		}
+		if ok {
+			return step, true
+		}
+	}
+	return 0, false
 }
 
 // StepUpGrantTTL 敏感操作 step-up 验证的有效窗口（sudo 模式）。
