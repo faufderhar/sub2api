@@ -3514,6 +3514,7 @@ type oauthPendingFlowTotpCacheStub struct {
 	setupSessions  map[int64]*service.TotpSetupSession
 	loginSessions  map[string]*service.TotpLoginSession
 	verifyAttempts map[int64]int
+	usedSteps      map[int64]int64
 }
 
 func (s *oauthPendingFlowTotpCacheStub) GetSetupSession(_ context.Context, userID int64) (*service.TotpSetupSession, error) {
@@ -3562,6 +3563,28 @@ func (s *oauthPendingFlowTotpCacheStub) IncrementVerifyAttempts(_ context.Contex
 	}
 	s.verifyAttempts[userID]++
 	return s.verifyAttempts[userID], nil
+}
+
+func (s *oauthPendingFlowTotpCacheStub) ReserveVerifyAttempt(_ context.Context, userID int64, maxAttempts int) (bool, error) {
+	if s.verifyAttempts == nil {
+		s.verifyAttempts = map[int64]int{}
+	}
+	if s.verifyAttempts[userID] >= maxAttempts {
+		return false, nil
+	}
+	s.verifyAttempts[userID]++
+	return true, nil
+}
+
+func (s *oauthPendingFlowTotpCacheStub) MarkCodeStepUsed(_ context.Context, userID int64, step int64, _ time.Duration) (bool, error) {
+	if s.usedSteps == nil {
+		s.usedSteps = map[int64]int64{}
+	}
+	if last, ok := s.usedSteps[userID]; ok && last >= step {
+		return false, nil
+	}
+	s.usedSteps[userID] = step
+	return true, nil
 }
 
 func (s *oauthPendingFlowTotpCacheStub) GetVerifyAttempts(_ context.Context, userID int64) (int, error) {
