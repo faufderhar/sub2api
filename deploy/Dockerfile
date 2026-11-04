@@ -26,6 +26,8 @@ RUN corepack enable && corepack prepare pnpm@9.15.9 --activate
 
 # Install dependencies first (better caching)
 COPY frontend/package.json frontend/pnpm-lock.yaml ./
+# xlsx 以离线 tarball 形式随仓库提供（file:vendor/xlsx-0.20.3.tgz），安装前需先拷入
+COPY frontend/vendor/ ./vendor/
 RUN pnpm install --frozen-lockfile
 
 # Copy frontend source and build.

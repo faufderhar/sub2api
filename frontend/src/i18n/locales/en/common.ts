@@ -18,6 +18,7 @@ export default {
     required: 'Required',
     sending: 'Sending...',
     tryAgain: 'Please try again',
+    componentLoadFailed: 'Failed to load this content. Please try again, or refresh the page if it keeps failing.',
     update: 'Update',
     confirm: 'Confirm',
     reset: 'Reset',

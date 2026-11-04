@@ -120,13 +120,23 @@ export default defineConfig(({ mode }) => {
               return 'vendor-vue'
             }
 
-            // UI 工具库（较大，单独分离）
-            if (id.includes('/@vueuse/') || id.includes('/xlsx/')) {
+            // UI 工具库
+            if (id.includes('/@vueuse/')) {
               return 'vendor-ui'
             }
 
-            // 图表库
-            if (id.includes('/chart.js/') || id.includes('/vue-chartjs/')) {
+            // xlsx 只在用量导出时动态 import，必须单独成块；
+            // 不能和 @vueuse 合并，否则所有用到 vueuse 的页面都会顺带加载 xlsx（L-11）
+            if (id.includes('/xlsx/')) {
+              return 'vendor-xlsx'
+            }
+
+            // 图表库（@kurkle/color 是 chart.js 的依赖，放在一起避免进入首屏 vendor-misc）
+            if (
+              id.includes('/chart.js/') ||
+              id.includes('/vue-chartjs/') ||
+              id.includes('/@kurkle/color/')
+            ) {
               return 'vendor-chart'
             }
 
@@ -138,6 +148,28 @@ export default defineConfig(({ mode }) => {
             // Stripe 仅在支付流程中按需加载，避免进入首页公共依赖。
             if (id.includes('/@stripe/stripe-js/')) {
               return 'vendor-stripe'
+            }
+
+            // 以下库只在特定页面使用，各自成块按需加载，不进入首屏 vendor-misc（L-11）
+            // Airwallex 仅 AirwallexPaymentView 使用
+            if (id.includes('/@airwallex/')) {
+              return 'vendor-airwallex'
+            }
+            // 拖拽排序仅支付渠道管理使用
+            if (id.includes('/vue-draggable-plus/')) {
+              return 'vendor-draggable'
+            }
+            // 虚拟滚动仅表格页使用
+            if (id.includes('/@tanstack/')) {
+              return 'vendor-virtual'
+            }
+            // 新手引导
+            if (id.includes('/driver.js/')) {
+              return 'vendor-driver'
+            }
+            // 二维码（支付、TOTP 绑定）
+            if (id.includes('/qrcode/')) {
+              return 'vendor-qrcode'
             }
 
             // 其他小型第三方库合并
