@@ -19,6 +19,37 @@ export function isHttpsAbsoluteUrl(value: string | null | undefined): boolean {
   }
 }
 
+/** 首页 iframe 默认 sandbox 权限（F-1）。同源 token 只作用于被嵌页面自身的源，不影响本站。 */
+export const HOME_IFRAME_SANDBOX_DEFAULT = [
+  'allow-scripts',
+  'allow-same-origin',
+  'allow-popups',
+  'allow-forms'
+] as const
+
+const HOME_IFRAME_SANDBOX_DEFAULT_SET = new Set<string>(HOME_IFRAME_SANDBOX_DEFAULT)
+
+/**
+ * 计算 iframe 最终 sandbox：与默认 token 取交集，不放宽。
+ * - 未写 sandbox → 用默认全集
+ * - 写了 sandbox（含空字符串）→ 只保留默认集合内的 token
+ * 空属性表示最严（无权限），交集仍为空。
+ */
+export function resolveHomeIframeSandbox(existing: string | null | undefined): string {
+  if (existing === null || existing === undefined) {
+    return HOME_IFRAME_SANDBOX_DEFAULT.join(' ')
+  }
+  const tokens = existing
+    .trim()
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean)
+    .filter((t) => HOME_IFRAME_SANDBOX_DEFAULT_SET.has(t))
+  // 稳定顺序：按默认 token 顺序输出
+  return HOME_IFRAME_SANDBOX_DEFAULT.filter((t) => tokens.includes(t)).join(' ')
+}
+
+
 // 首页清洗专用的独立 DOMPurify 实例（D-3）：hook 只挂在这个实例上，
 // 不影响其他地方直接使用的全局 DOMPurify（公告、支付说明、自定义页等）。
 let homePurifier: ReturnType<typeof DOMPurify> | null = null
@@ -35,6 +66,12 @@ function getHomePurifier(): ReturnType<typeof DOMPurify> {
         node.remove()
         return
       }
+      // F-1：统一加 sandbox；管理员自写的取交集，不放宽
+      const hadSandbox = node.hasAttribute('sandbox')
+      node.setAttribute(
+        'sandbox',
+        resolveHomeIframeSandbox(hadSandbox ? node.getAttribute('sandbox') : null)
+      )
     }
     if ((node.getAttribute('target') || '').trim().toLowerCase() !== '_blank') return
     const rel = new Set((node.getAttribute('rel') || '').toLowerCase().split(/\s+/).filter(Boolean))
@@ -57,6 +94,8 @@ function getHomePurifier(): ReturnType<typeof DOMPurify> {
  *   rel="noopener noreferrer"（D-3，保留原有的其他 rel 值）。
  * - 保留 iframe 的 sandbox、allow、referrerpolicy、loading（D-2）：管理员用 sandbox 收紧权限、
  *   常见嵌入代码用 allow 开启自动播放/全屏等，剥掉反而会放宽限制或造成功能回归。
+ * - F-1：所有保留的 iframe 统一写入 sandbox；默认 allow-scripts allow-same-origin allow-popups
+ *   allow-forms；管理员自写的 sandbox 与默认取交集，不放宽。
  */
 export function sanitizeHomeContent(html: string): string {
   if (!html) return ''
