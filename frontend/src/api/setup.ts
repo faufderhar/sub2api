@@ -3,6 +3,7 @@
  */
 import axios, { type AxiosError, type InternalAxiosRequestConfig } from 'axios'
 import { buildGatewayUrl } from './url'
+import { parseRetryAfter } from '@/utils/retryAfter'
 
 // Create a separate client for setup endpoints (not under /api/v1)
 const setupClient = axios.create({
@@ -115,12 +116,8 @@ export function normalizeSetupError(error: unknown): {
     (typeof data?.detail === 'string' && data.detail) ||
     ax.message ||
     'Request failed'
-  let retryAfter: number | undefined
   const raw = ax.response?.headers?.['retry-after'] ?? ax.response?.headers?.['Retry-After']
-  if (raw != null) {
-    const n = parseInt(String(raw), 10)
-    if (!Number.isNaN(n)) retryAfter = n
-  }
+  const retryAfter = parseRetryAfter(raw)
   return { message, reason, status, retryAfter }
 }
 

@@ -99,6 +99,19 @@ describe('setup API (F-5)', () => {
     expect(n.status).toBe(429)
   })
 
+  it('normalizeSetupError parses Retry-After HTTP-date into remaining seconds', () => {
+    const future = new Date(Date.now() + 45_000).toUTCString()
+    const n = normalizeSetupError({
+      response: {
+        status: 429,
+        headers: { 'retry-after': future },
+        data: { code: 429, reason: SETUP_TOKEN_RATE_LIMITED, message: 'slow down' }
+      }
+    })
+    expect(n.retryAfter).toBeGreaterThanOrEqual(40)
+    expect(n.retryAfter).toBeLessThanOrEqual(45)
+  })
+
   it('normalizeSetupError maps invalid / required reasons', () => {
     expect(
       normalizeSetupError({
