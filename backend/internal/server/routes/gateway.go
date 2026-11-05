@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/domain"
@@ -30,8 +31,10 @@ func RegisterGatewayRoutes(
 	compositeResolver *service.CompositeRouteResolver,
 	cfg *config.Config,
 ) {
-	bodyLimit := middleware.RequestBodyLimit(cfg.Gateway.MaxBodySize)
-	textBodyLimit := middleware.RequestBodyLimit(cfg.Gateway.TextMaxBodySize)
+	// T-4：gateway.request_body_read_timeout > 0 时给网关路由加请求体读超时（默认 0 关闭）。
+	bodyReadTimeout := time.Duration(cfg.Gateway.RequestBodyReadTimeout) * time.Second
+	bodyLimit := middleware.WithBodyReadTimeout(middleware.RequestBodyLimit(cfg.Gateway.MaxBodySize), bodyReadTimeout)
+	textBodyLimit := middleware.WithBodyReadTimeout(middleware.RequestBodyLimit(cfg.Gateway.TextMaxBodySize), bodyReadTimeout)
 	clientRequestID := middleware.ClientRequestID()
 	opsErrorLogger := handler.OpsErrorLoggerMiddleware(opsService)
 	endpointNorm := handler.InboundEndpointMiddleware()
