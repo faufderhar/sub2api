@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/safego"
 )
 
 const expiryCheckTimeout = 30 * time.Second
@@ -60,15 +62,16 @@ func (s *PaymentOrderExpiryService) Start() {
 	}
 	s.wg.Add(1)
 	go func() {
+		defer safego.Recover("scheduler.payment_order_expiry")
 		defer s.wg.Done()
 		ticker := time.NewTicker(s.interval)
 		defer ticker.Stop()
 
-		s.runOnce()
+		safego.Tick("scheduler.payment_order_expiry", s.runOnce)
 		for {
 			select {
 			case <-ticker.C:
-				s.runOnce()
+				safego.Tick("scheduler.payment_order_expiry", s.runOnce)
 			case <-s.stopCh:
 				return
 			}

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/safego"
 	"github.com/google/uuid"
 )
 
@@ -77,15 +78,16 @@ func (s *SubscriptionExpiryService) Start() {
 	}
 	s.wg.Add(1)
 	go func() {
+		defer safego.Recover("scheduler.subscription_expiry")
 		defer s.wg.Done()
 		ticker := time.NewTicker(s.interval)
 		defer ticker.Stop()
 
-		s.runOnce()
+		safego.Tick("scheduler.subscription_expiry", s.runOnce)
 		for {
 			select {
 			case <-ticker.C:
-				s.runOnce()
+				safego.Tick("scheduler.subscription_expiry", s.runOnce)
 			case <-s.stopCh:
 				return
 			}

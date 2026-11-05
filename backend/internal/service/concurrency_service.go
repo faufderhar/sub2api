@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/safego"
 	"go.uber.org/zap"
 	"golang.org/x/sync/singleflight"
 )
@@ -758,12 +759,13 @@ func (s *ConcurrencyService) StartSlotCleanupWorker(_ AccountRepository, interva
 	}
 
 	go func() {
+		defer safego.Recover("scheduler.concurrency_cleanup")
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 
-		runCleanup()
+		safego.Tick("scheduler.concurrency_cleanup", runCleanup)
 		for range ticker.C {
-			runCleanup()
+			safego.Tick("scheduler.concurrency_cleanup", runCleanup)
 		}
 	}()
 }

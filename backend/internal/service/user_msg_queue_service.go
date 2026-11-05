@@ -12,6 +12,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/safego"
 	"github.com/tidwall/gjson"
 )
 
@@ -268,6 +269,7 @@ func (s *UserMessageQueueService) StartCleanupWorker(interval time.Duration) {
 	}
 
 	go func() {
+		defer safego.Recover("scheduler.user_msg_queue_cleanup")
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		for {
@@ -275,7 +277,7 @@ func (s *UserMessageQueueService) StartCleanupWorker(interval time.Duration) {
 			case <-s.stopCh:
 				return
 			case <-ticker.C:
-				runCleanup()
+				safego.Tick("scheduler.user_msg_queue_cleanup", runCleanup)
 			}
 		}
 	}()

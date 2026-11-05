@@ -22,6 +22,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/safego"
 	"github.com/Wei-Shaw/sub2api/internal/util/urlvalidator"
 	"go.uber.org/zap"
 )
@@ -368,6 +369,7 @@ func (s *PricingService) startUpdateScheduler() {
 
 	s.wg.Add(1)
 	go func() {
+		defer safego.Recover("scheduler.pricing_sync")
 		defer s.wg.Done()
 		ticker := time.NewTicker(hashInterval)
 		defer ticker.Stop()

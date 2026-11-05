@@ -7,6 +7,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/safego"
 )
 
 const (
@@ -132,6 +134,7 @@ func (a *OpsIngressRejectAggregator) Start() {
 	a.accepting.Store(true)
 	a.wg.Add(1)
 	go func() {
+		defer safego.Recover("scheduler.ops_ingress_reject_flush")
 		defer a.wg.Done()
 		ticker := time.NewTicker(ingressRejectFlushInterval)
 		defer ticker.Stop()
@@ -140,10 +143,10 @@ func (a *OpsIngressRejectAggregator) Start() {
 			case <-a.ctx.Done():
 				return
 			case <-ticker.C:
-				a.snapshotAndEnqueue(false)
-				a.flushPending()
+				safego.Tick("scheduler.ops_ingress_reject_flush", func() { a.snapshotAndEnqueue(false) })
+				safego.Tick("scheduler.ops_ingress_reject_flush", a.flushPending)
 			case <-a.flushCh:
-				a.flushPending()
+				safego.Tick("scheduler.ops_ingress_reject_flush", a.flushPending)
 			}
 		}
 	}()
