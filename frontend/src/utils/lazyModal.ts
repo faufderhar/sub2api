@@ -1,38 +1,10 @@
 import { defineComponent, h, nextTick, ref, shallowRef, watch, type Component } from 'vue'
 import { i18n } from '@/i18n'
 import { useAppStore } from '@/stores/app'
+import { isChunkLoadError, tryReloadForChunkError } from '@/utils/chunkLoadError'
 
-// 与 router.onError 共用同一个 sessionStorage 键和 10 秒窗口，二者合计在 10 秒内最多自动刷新一次，避免循环刷新
-const CHUNK_RELOAD_KEY = 'chunk_reload_attempted'
-const CHUNK_RELOAD_WINDOW_MS = 10000
-
-export function isChunkLoadError(error: unknown): boolean {
-  const e = error as { message?: string; name?: string } | null
-  const message = e?.message ?? ''
-  return (
-    message.includes('Failed to fetch dynamically imported module') ||
-    message.includes('error loading dynamically imported module') ||
-    message.includes('Importing a module script failed') ||
-    message.includes('Loading chunk') ||
-    message.includes('Loading CSS chunk') ||
-    e?.name === 'ChunkLoadError'
-  )
-}
-
-/** chunk 加载失败（多为发版后旧 chunk 已删除）时整页刷新一次；10 秒内已刷新过则返回 false。 */
-export function tryReloadForChunkError(): boolean {
-  try {
-    const last = sessionStorage.getItem(CHUNK_RELOAD_KEY)
-    const now = Date.now()
-    if (last && now - parseInt(last, 10) <= CHUNK_RELOAD_WINDOW_MS) return false
-    sessionStorage.setItem(CHUNK_RELOAD_KEY, now.toString())
-  } catch {
-    return false
-  }
-  console.warn('[lazyModal] chunk load error detected, reloading page to fetch latest version...')
-  window.location.reload()
-  return true
-}
+// Re-export so existing imports from lazyModal keep working.
+export { isChunkLoadError, tryReloadForChunkError }
 
 /**
  * 把体积大的弹窗包装成“首次打开时才加载”的组件（L-11）。

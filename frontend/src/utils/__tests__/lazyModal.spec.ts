@@ -152,6 +152,9 @@ describe('lazyModal', () => {
       expect(isChunkLoadError(new TypeError('Failed to fetch dynamically imported module: x'))).toBe(true)
       expect(isChunkLoadError(new TypeError('error loading dynamically imported module: x'))).toBe(true)
       expect(isChunkLoadError(new TypeError('Importing a module script failed.'))).toBe(true)
+      expect(isChunkLoadError(new Error('Loading CSS chunk 1 failed'))).toBe(true)
+      const named = new Error('x'); named.name = 'ChunkLoadError'
+      expect(isChunkLoadError(named)).toBe(true)
       expect(isChunkLoadError(new Error('boom'))).toBe(false)
       expect(isChunkLoadError(null)).toBe(false)
     })
