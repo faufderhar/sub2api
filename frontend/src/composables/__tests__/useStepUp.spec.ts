@@ -35,7 +35,8 @@ describe('useStepUp error classification', () => {
     expect(isStepUpBlocked(err)).toBe(true)
     expect(isStepUpRequired(err)).toBe(false)
     const t = (key: string) => `i18n:${key}`
-    expect(stepUpBlockedMessage(err, t)).toBe('Step-up verification service unavailable')
+    // FD2-10: ignore English-only backend message; use FE i18n
+    expect(stepUpBlockedMessage(err, t)).toBe('i18n:stepUp.unavailable')
   })
 
   it('FD2-9：任意非 REQUIRED 的 STEP_UP_* 前缀都视为阻断', () => {
@@ -90,6 +91,41 @@ describe('useStepUp error classification', () => {
     expect(stepUpBlockedMessage({ reason: 'STEP_UP_FUTURE_UNKNOWN' }, t)).toBe(
       'i18n:stepUp.blocked'
     )
+  })
+
+  it('FD2-10: STEP_UP_UNAVAILABLE always uses FE i18n (ignores English backend message)', () => {
+    const t = (key: string) => `i18n:${key}`
+    expect(
+      stepUpBlockedMessage(
+        {
+          status: 503,
+          reason: 'STEP_UP_UNAVAILABLE',
+          message: 'Step-up verification service unavailable'
+        },
+        t
+      )
+    ).toBe('i18n:stepUp.unavailable')
+    expect(
+      stepUpBlockedMessage(
+        {
+          status: 503,
+          code: 'STEP_UP_UNAVAILABLE',
+          message: 'Step-up verification service unavailable'
+        },
+        t
+      )
+    ).toBe('i18n:stepUp.unavailable')
+    // other blocked codes still prefer backend message
+    expect(
+      stepUpBlockedMessage(
+        {
+          status: 403,
+          reason: 'STEP_UP_ADMIN_API_KEY_FORBIDDEN',
+          message: '该操作需要已完成两步验证的管理员会话'
+        },
+        t
+      )
+    ).toBe('该操作需要已完成两步验证的管理员会话')
   })
 
   it('does not open TOTP dialog for blocked / unknown STEP_UP_* reasons', async () => {

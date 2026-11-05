@@ -88,17 +88,23 @@ export function stepUpBlockReason(err: unknown): string {
  * User-facing text for a blocked step-up error.
  * Prefers the backend envelope `message` (contract: safe to show as-is),
  * then falls back to i18n keys for offline / legacy responses.
+ *
+ * FD2-10：`STEP_UP_UNAVAILABLE` 例外——后端 message 仅英文，始终用前端中英文文案。
  * Only STEP_UP_REQUIRED opens the TOTP dialog; blocked reasons never do.
  */
 export function stepUpBlockedMessage(
   err: unknown,
   t: (key: string) => string
 ): string {
+  const reason = stepUpBlockReason(err)
+  if (reason === STEP_UP_UNAVAILABLE) {
+    return t(STEP_UP_BLOCKED_I18N[STEP_UP_UNAVAILABLE])
+  }
   const e = (err ?? {}) as ApiError
   if (typeof e.message === 'string' && e.message.trim()) {
     return e.message.trim()
   }
-  const key = STEP_UP_BLOCKED_I18N[stepUpBlockReason(err)]
+  const key = STEP_UP_BLOCKED_I18N[reason]
   return key ? t(key) : t('stepUp.blocked')
 }
 
