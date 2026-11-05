@@ -35,8 +35,12 @@ describe('shouldWarnHomeContentHttp (F-2)', () => {
     expect(shouldWarnHomeContentHttp('<h1>hello</h1><p>world</p>')).toBe(false)
   })
 
-  it('javascript:/data: 开头不是 URL 模式；富文本无 iframe 时不因协议提示', () => {
-    expect(shouldWarnHomeContentHttp('javascript:alert(1)')).toBe(false)
-    expect(shouldWarnHomeContentHttp('data:text/html,hi')).toBe(false)
+  it('FD2-4：明显误填的 URL 形态提示', () => {
+    expect(shouldWarnHomeContentHttp('https:a.com')).toBe(true)
+    expect(shouldWarnHomeContentHttp('http:/a.com')).toBe(true)
+    expect(shouldWarnHomeContentHttp('//a.com')).toBe(true)
+    expect(shouldWarnHomeContentHttp('javascript:alert(1)')).toBe(true)
+    expect(shouldWarnHomeContentHttp('data:text/html,hi')).toBe(true)
+    expect(shouldWarnHomeContentHttp('just some text')).toBe(false)
   })
 })

@@ -503,7 +503,7 @@ import { useAuthStore, useAppStore } from '@/stores'
 import LocaleSwitcher from '@/components/common/LocaleSwitcher.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { sanitizeUrl } from '@/utils/url'
-import { HOME_IFRAME_SANDBOX_DEFAULT, isHttpsAbsoluteUrl, sanitizeHomeContent } from '@/utils/sanitize'
+import { isHttpsAbsoluteUrl, resolveHomeIframeSandbox, sanitizeHomeContent } from '@/utils/sanitize'
 import { FeatureFlags, isFeatureFlagEnabled } from '@/utils/featureFlags'
 
 const { t } = useI18n()
@@ -531,8 +531,8 @@ const homeContentEmbedUrl = computed(() => {
   const content = homeContent.value.trim()
   return isHomeContentUrl.value && isHttpsAbsoluteUrl(content) ? content : ''
 })
-// F-1：URL 模式整页嵌入也带默认 sandbox（管理员无法在 URL 模式自写 sandbox）
-const homeIframeSandbox = HOME_IFRAME_SANDBOX_DEFAULT.join(' ')
+// F-1 / A-1：URL 模式整页嵌入用默认 sandbox；同源时去掉 allow-same-origin
+const homeIframeSandbox = computed(() => resolveHomeIframeSandbox(null, homeContentEmbedUrl.value || homeContent.value.trim()))
 
 // Theme
 const isDark = ref(document.documentElement.classList.contains('dark'))
