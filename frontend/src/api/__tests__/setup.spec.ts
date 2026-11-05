@@ -137,7 +137,7 @@ describe('setup API (F-5)', () => {
   })
 })
 
-describe('setupTokenUserMessage (FD2-14)', () => {
+describe('setupTokenUserMessage (FD2-14 / FD2-17)', () => {
   function tFor(locale: 'en' | 'zh') {
     const root = locale === 'en' ? enLanding : zhLanding
     return (key: string, params?: Record<string, unknown>) => {
@@ -182,16 +182,57 @@ describe('setupTokenUserMessage (FD2-14)', () => {
     ).toBe('Too many attempts. Try again in 45s')
   })
 
-  it('RATE_LIMITED defaults seconds to 0 when Retry-After absent', () => {
-    const t = tFor('en')
-    expect(setupTokenUserMessage({ reason: SETUP_TOKEN_RATE_LIMITED }, t)).toBe(
-      'Too many attempts. Try again in 0s'
+  it('FD2-17: RATE_LIMITED without Retry-After uses no-wait copy (zh + en)', () => {
+    expect(setupTokenUserMessage({ reason: SETUP_TOKEN_RATE_LIMITED }, tFor('en'))).toBe(
+      enLanding.setup.setupToken.rateLimitedNoWait
+    )
+    expect(setupTokenUserMessage({ reason: SETUP_TOKEN_RATE_LIMITED }, tFor('zh'))).toBe(
+      zhLanding.setup.setupToken.rateLimitedNoWait
     )
   })
 
-  it('returns null for non-token reasons', () => {
+  it('FD2-17: RATE_LIMITED with retryAfter 0 or invalid uses no-wait copy', () => {
+    const t = tFor('en')
+    expect(
+      setupTokenUserMessage({ reason: SETUP_TOKEN_RATE_LIMITED, retryAfter: 0 }, t)
+    ).toBe(enLanding.setup.setupToken.rateLimitedNoWait)
+    // normalizeSetupError leaves retryAfter undefined when header unparseable
+    expect(
+      setupTokenUserMessage({ reason: SETUP_TOKEN_RATE_LIMITED, retryAfter: undefined }, t)
+    ).toBe(enLanding.setup.setupToken.rateLimitedNoWait)
+  })
+
+  it('FD2-17: seconds template only when retryAfter > 0', () => {
+    const t = tFor('zh')
+    expect(
+      setupTokenUserMessage({ reason: SETUP_TOKEN_RATE_LIMITED, retryAfter: 1 }, t)
+    ).toBe('尝试过多，请 1 秒后再试')
+    expect(
+      setupTokenUserMessage({ reason: SETUP_TOKEN_RATE_LIMITED, retryAfter: 0 }, t)
+    ).toBe(zhLanding.setup.setupToken.rateLimitedNoWait)
+  })
+
+  it('FD2-17: HTTP 429 without reason uses FE rate-limit copy (not backend message)', () => {
+    const tEn = tFor('en')
+    const tZh = tFor('zh')
+    expect(
+      setupTokenUserMessage(
+        { status: 429, message: 'slow down from backend' } as never,
+        tEn
+      )
+    ).toBe(enLanding.setup.setupToken.rateLimitedNoWait)
+    expect(
+      setupTokenUserMessage(
+        { status: 429, retryAfter: 12, message: '后端随便写的' } as never,
+        tZh
+      )
+    ).toBe('尝试过多，请 12 秒后再试')
+  })
+
+  it('returns null for non-token non-429 errors', () => {
     const t = tFor('en')
     expect(setupTokenUserMessage({ reason: 'OTHER' }, t)).toBeNull()
+    expect(setupTokenUserMessage({ status: 500 }, t)).toBeNull()
     expect(setupTokenUserMessage({}, t)).toBeNull()
   })
 })

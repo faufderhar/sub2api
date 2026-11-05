@@ -1,7 +1,8 @@
 /**
  * Detect whether home-page content URL input should show an insecure / unsupported tip.
- * F-2 / FD2-4 / FD2-8 / FD2-12.
+ * F-2 / FD2-4 / FD2-8 / FD2-12 / FD2-15 / FD2-16.
  */
+import { isHttpsAbsoluteUrl } from '@/utils/sanitize'
 
 /** Absolute https URL (case-insensitive scheme). */
 const ABSOLUTE_HTTPS = /^https:\/\//i
@@ -43,25 +44,26 @@ function collapseSchemeLetters(raw: string): string {
 }
 
 /**
- * FD2-12: javascript / data / vbscript (and obfuscated forms) are dangerous.
+ * FD2-12 / FD2-16: javascript / data / vbscript (and obfuscated forms) are dangerous.
  * Not bound by the FD2-8 single-token rule — payloads may contain spaces.
  *
- * Conflict with prose like「data: 今日数据更新」: only treat as dangerous when the
- * character immediately after the scheme colon is non-whitespace (or rest is empty).
- * If the rest starts with whitespace, this rule does not fire; FD2-8 then also
- * rejects the multi-token string, so no tip is shown.
+ * FD2-16: the "colon followed by whitespace → not dangerous" exception applies
+ * **only** to `data:` (so「data: 今日数据更新」stays clean). `javascript:` and
+ * `vbscript:` are always dangerous once the scheme matches, including
+ * `javascript: alert(1)` and `javascript:\talert(1)`.
  */
 export function looksLikeDangerousHomeScheme(content: string): boolean {
   const s = content.replace(LEADING_JUNK, '')
   const m = OBFUSCATED_SCHEME.exec(s)
   if (!m) return false
   const scheme = collapseSchemeLetters(m[1])
-  if (scheme !== 'javascript' && scheme !== 'data' && scheme !== 'vbscript') {
-    return false
+  if (scheme === 'javascript' || scheme === 'vbscript') {
+    return true
   }
+  if (scheme !== 'data') return false
   const rest = m[2]
   if (rest.length === 0) return true
-  // Only dangerous when the first character after ':' is not whitespace.
+  // data: only — dangerous when the first character after ':' is not whitespace.
   return !/^\s/.test(rest)
 }
 
@@ -121,23 +123,12 @@ export function shouldWarnHomeContentHttp(content: string): boolean {
   const trimmed = content.trim()
   if (!trimmed) return false
 
-  // Absolute https URL — only warn if URL constructor rejects it.
-  if (ABSOLUTE_HTTPS.test(trimmed)) {
-    try {
-      // eslint-disable-next-line no-new
-      new URL(trimmed)
-      return false
-    } catch {
-      return true
-    }
+  // URL mode: same predicate as sanitize / HomeView embed (FD2-15 restores isHttpsAbsoluteUrl).
+  if (/^https?:\/\//i.test(trimmed)) {
+    return !isHttpsAbsoluteUrl(trimmed)
   }
 
-  // Absolute http URL (insecure).
-  if (ABSOLUTE_HTTP.test(trimmed)) {
-    return true
-  }
-
-  // FD2-12 dangerous schemes (ignore single-token; allow spaced payloads).
+  // FD2-12 / FD2-16 dangerous schemes (ignore single-token; allow spaced payloads).
   if (looksLikeDangerousHomeScheme(content)) {
     return true
   }
@@ -152,17 +143,14 @@ export function shouldWarnHomeContentHttp(content: string): boolean {
     return true
   }
 
-  // Rich text: any iframe that is not clearly https will be stripped by the sanitizer.
+  // Rich text: tip whenever sanitizeHomeContent would strip the iframe
+  // (empty/missing src or not isHttpsAbsoluteUrl) — FD2-15.
   if (!trimmed.includes('<')) return false
   try {
     const doc = new DOMParser().parseFromString(trimmed, 'text/html')
     const iframes = Array.from(doc.querySelectorAll('iframe'))
     if (iframes.length === 0) return false
-    return iframes.some((el) => {
-      const src = (el.getAttribute('src') || '').trim()
-      if (!src) return true
-      return !ABSOLUTE_HTTPS.test(src)
-    })
+    return iframes.some((el) => !isHttpsAbsoluteUrl(el.getAttribute('src')))
   } catch {
     return /<iframe\b/i.test(trimmed)
   }

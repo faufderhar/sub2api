@@ -240,7 +240,8 @@ export default {
       hint: 'Find it in the service startup log as: [setup] Setup token: <token>',
       required: 'Setup token is required',
       invalid: 'Setup token is incorrect. Check the latest token in the service startup log.',
-      rateLimited: 'Too many attempts. Try again in {seconds}s'
+      rateLimited: 'Too many attempts. Try again in {seconds}s',
+      rateLimitedNoWait: 'Too many attempts. Please try again later'
     },
     ready: {
       title: 'Ready to Install',

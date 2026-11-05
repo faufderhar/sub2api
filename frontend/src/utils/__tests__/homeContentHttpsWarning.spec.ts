@@ -34,6 +34,14 @@ describe('shouldWarnHomeContentHttp (F-2)', () => {
     expect(shouldWarnHomeContentHttp('<iframe src=""></iframe>')).toBe(true)
   })
 
+  it('FD2-15：富文本 iframe src 非合法 https 绝对地址也提示（与清洗对齐，恢复 1eb 行为）', () => {
+    expect(shouldWarnHomeContentHttp('<iframe src="https://exa mple.com"></iframe>')).toBe(true)
+    expect(shouldWarnHomeContentHttp('<iframe src="https://"></iframe>')).toBe(true)
+    expect(shouldWarnHomeContentHttp('<iframe src="https://[::1/x"></iframe>')).toBe(true)
+    expect(shouldWarnHomeContentHttp('<iframe src="https://example.com"></iframe>')).toBe(false)
+    expect(shouldWarnHomeContentHttp('<iframe src="HTTPS://EXAMPLE.com/x"></iframe>')).toBe(false)
+  })
+
   it('空内容和不含 iframe 的 HTML 不提示', () => {
     expect(shouldWarnHomeContentHttp('')).toBe(false)
     expect(shouldWarnHomeContentHttp('   ')).toBe(false)
@@ -57,7 +65,7 @@ describe('shouldWarnHomeContentHttp (F-2)', () => {
   })
 })
 
-describe('looksLikeDangerousHomeScheme (FD2-12)', () => {
+describe('looksLikeDangerousHomeScheme (FD2-12 / FD2-16)', () => {
   it('detects javascript / data / vbscript with mixed case', () => {
     expect(looksLikeDangerousHomeScheme('JavaScript:alert(1)')).toBe(true)
     expect(looksLikeDangerousHomeScheme('DATA:text/html,x')).toBe(true)
@@ -84,15 +92,20 @@ describe('looksLikeDangerousHomeScheme (FD2-12)', () => {
     ).toBe(true)
   })
 
-  it('data: with whitespace immediately after colon is NOT dangerous (prose conflict)', () => {
-    // Positive: dangerous only when first char after ':' is non-whitespace
+  it('FD2-16: whitespace-after-colon exception only for data:', () => {
+    // data: — space after colon → not dangerous / no tip
     expect(looksLikeDangerousHomeScheme('data:text/html,hi')).toBe(true)
     expect(looksLikeDangerousHomeScheme('data:')).toBe(true)
-    // Negative: 「data: 今日数据更新」— space after colon → not dangerous;
-    // FD2-8 single-token also rejects → overall no tip.
     expect(looksLikeDangerousHomeScheme('data: 今日数据更新')).toBe(false)
     expect(shouldWarnHomeContentHttp('data: 今日数据更新')).toBe(false)
-    expect(looksLikeDangerousHomeScheme('javascript: alert(1)')).toBe(false)
+
+    // javascript / vbscript — always dangerous, including whitespace after colon
+    expect(looksLikeDangerousHomeScheme('javascript: alert(1)')).toBe(true)
+    expect(looksLikeDangerousHomeScheme('javascript:\talert(1)')).toBe(true)
+    expect(looksLikeDangerousHomeScheme('vbscript: msgbox(1)')).toBe(true)
+    expect(shouldWarnHomeContentHttp('javascript: alert(1)')).toBe(true)
+    expect(shouldWarnHomeContentHttp('javascript:\talert(1)')).toBe(true)
+    expect(shouldWarnHomeContentHttp('vbscript: msgbox(1)')).toBe(true)
   })
 })
 

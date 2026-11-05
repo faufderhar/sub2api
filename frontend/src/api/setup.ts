@@ -158,26 +158,32 @@ export type SetupTokenTranslate = (
 ) => string
 
 /**
- * FD2-14: map SETUP_TOKEN_* reasons to frontend i18n copy.
- * Never surface the backend `message` for these codes (locale may differ).
- * Returns null when the error is not a setup-token envelope reason.
+ * FD2-14 / FD2-17: map SETUP_TOKEN_* (and bare 429) to frontend i18n copy.
+ * Never surface the backend `message` for these cases (locale may differ).
+ *
+ * FD2-17: RATE_LIMITED / HTTP 429 use the seconds template only when
+ * `retryAfter` is a number > 0; otherwise use `rateLimitedNoWait`.
+ * A 429 with no `reason` is still treated as rate-limited (restores the
+ * pre-bac3c2da1 `status === 429` path that FD2-14 accidentally narrowed).
  */
 export function setupTokenUserMessage(
-  err: { reason?: string; retryAfter?: number },
+  err: { reason?: string; retryAfter?: number; status?: number },
   t: SetupTokenTranslate
 ): string | null {
-  switch (err.reason) {
-    case SETUP_TOKEN_REQUIRED:
-      return t('setup.setupToken.required')
-    case SETUP_TOKEN_INVALID:
-      return t('setup.setupToken.invalid')
-    case SETUP_TOKEN_RATE_LIMITED:
-      return t('setup.setupToken.rateLimited', {
-        seconds: err.retryAfter ?? 0
-      })
-    default:
-      return null
+  if (err.reason === SETUP_TOKEN_REQUIRED) {
+    return t('setup.setupToken.required')
   }
+  if (err.reason === SETUP_TOKEN_INVALID) {
+    return t('setup.setupToken.invalid')
+  }
+  const rateLimited =
+    err.reason === SETUP_TOKEN_RATE_LIMITED || err.status === 429
+  if (!rateLimited) return null
+  const seconds = err.retryAfter
+  if (typeof seconds === 'number' && seconds > 0) {
+    return t('setup.setupToken.rateLimited', { seconds })
+  }
+  return t('setup.setupToken.rateLimitedNoWait')
 }
 
 /** Exposed for unit tests. */
