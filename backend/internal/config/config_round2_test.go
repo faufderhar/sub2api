@@ -24,3 +24,19 @@ func TestRound2_MaxLineSizeDefault(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 16*1024*1024, cfg.Gateway.MaxLineSize)
 }
+
+// L-7 / D7a: Redis failure policy defaults to fail_open; invalid values are rejected.
+func TestRound2_RedisFailurePolicy(t *testing.T) {
+	resetViperWithJWTSecret(t)
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.Equal(t, RedisFailurePolicyFailOpen, cfg.Concurrency.RedisFailurePolicy)
+	require.False(t, cfg.Concurrency.RedisFailClose())
+
+	cfg.Concurrency.RedisFailurePolicy = RedisFailurePolicyFailClose
+	require.NoError(t, cfg.Validate())
+	require.True(t, cfg.Concurrency.RedisFailClose())
+
+	cfg.Concurrency.RedisFailurePolicy = "maybe"
+	require.ErrorContains(t, cfg.Validate(), "concurrency.redis_failure_policy")
+}

@@ -475,6 +475,10 @@ func ProvideConcurrencyService(cache ConcurrencyCache, accountRepo AccountReposi
 		logger.LegacyPrintf("service.concurrency", "Warning: startup cleanup stale process slots failed: %v", err)
 	}
 	if cfg != nil {
+		svc.SetRedisFailClose(cfg.Concurrency.RedisFailClose())
+		if cfg.Concurrency.RedisFailClose() {
+			logger.LegacyPrintf("service.concurrency", "Warning: concurrency.redis_failure_policy=fail_close: requests are rejected while Redis is unavailable")
+		}
 		svc.SetAccountLoadBatchCacheTTL(time.Duration(cfg.Gateway.Scheduling.LoadBatchCacheTTLMS) * time.Millisecond)
 		svc.StartSlotCleanupWorker(accountRepo, cfg.Gateway.Scheduling.SlotCleanupInterval)
 	}

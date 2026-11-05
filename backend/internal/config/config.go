@@ -1050,6 +1050,20 @@ type CircuitBreakerConfig struct {
 type ConcurrencyConfig struct {
 	// PingInterval: 并发等待期间的 SSE ping 间隔（秒）
 	PingInterval int `mapstructure:"ping_interval"`
+	// RedisFailurePolicy（L-7）：Redis 故障时并发等待队列计数与用户/分组 RPM 限流的处理策略。
+	// fail_open（默认，D7a）：放行并打 warning；fail_close：拒绝（等待队列按已满处理返回 429，
+	// RPM 返回 503 BILLING_SERVICE_ERROR）并打 warning。
+	RedisFailurePolicy string `mapstructure:"redis_failure_policy"`
+}
+
+const (
+	RedisFailurePolicyFailOpen  = "fail_open"
+	RedisFailurePolicyFailClose = "fail_close"
+)
+
+// RedisFailClose 报告是否配置为 fail_close（空值 / 未知值按默认 fail_open 处理；未知值由 Validate 拒绝）。
+func (c ConcurrencyConfig) RedisFailClose() bool {
+	return strings.EqualFold(strings.TrimSpace(c.RedisFailurePolicy), RedisFailurePolicyFailClose)
 }
 
 type ImageConcurrencyConfig struct {
@@ -2711,6 +2725,7 @@ func setDefaults() {
 
 	viper.SetDefault("gateway.tls_fingerprint.enabled", true)
 	viper.SetDefault("concurrency.ping_interval", 10)
+	viper.SetDefault("concurrency.redis_failure_policy", RedisFailurePolicyFailOpen)
 
 	// TokenRefresh
 	viper.SetDefault("token_refresh.enabled", true)
@@ -3914,6 +3929,11 @@ func (c *Config) Validate() error {
 	}
 	if c.Concurrency.PingInterval < 5 || c.Concurrency.PingInterval > 30 {
 		return fmt.Errorf("concurrency.ping_interval must be between 5-30 seconds")
+	}
+	switch strings.ToLower(strings.TrimSpace(c.Concurrency.RedisFailurePolicy)) {
+	case "", RedisFailurePolicyFailOpen, RedisFailurePolicyFailClose:
+	default:
+		return fmt.Errorf("concurrency.redis_failure_policy must be %q or %q", RedisFailurePolicyFailOpen, RedisFailurePolicyFailClose)
 	}
 	if c.Gateway.Grok.FreeQuotaSoftGateEnabled {
 		if c.Gateway.Grok.FreeQuotaTokenLimit <= 0 {
