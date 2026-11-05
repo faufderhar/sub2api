@@ -439,7 +439,11 @@ curl -sSL https://raw.githubusercontent.com/Wei-Shaw/sub2api/main/deploy/install
    sudo systemctl enable sub2api
    sudo systemctl start sub2api
    ```
-5. Open the Setup Wizard in your browser to complete configuration
+5. Open the Setup Wizard in your browser to complete configuration.
+   The wizard asks for a **setup token** printed in the startup log
+   (`sudo journalctl -u sub2api | grep "Setup token"`, or `docker logs <container> | grep "Setup token"`):
+   `[setup] Setup token: <32 hex chars>`. The token is regenerated on every restart.
+   安装向导需要填写启动日志中打印的 setup token（每次重启都会重新生成）。
 
 ### Commands
 

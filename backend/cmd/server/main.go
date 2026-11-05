@@ -106,7 +106,9 @@ func runSetupServer() {
 	}))
 
 	// Register setup routes
-	setup.RegisterRoutes(r)
+	if err := setup.RegisterRoutes(r); err != nil {
+		log.Fatalf("Failed to initialize setup wizard: %v", err)
+	}
 
 	// Serve embedded frontend if available
 	if web.HasEmbeddedFrontend() {

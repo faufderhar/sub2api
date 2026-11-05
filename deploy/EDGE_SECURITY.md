@@ -319,3 +319,17 @@ cannot absorb volumetric attacks, TLS floods, bandwidth saturation, or a large
 distributed source set. Those require upstream network capacity, CDN/WAF
 filtering, provider firewall rules, and origin isolation. Avoid high-cardinality
 metrics or per-request database security logs during rejection storms.
+
+## Setup wizard token / 安装向导 token
+
+While the instance is not installed, the setup wizard prints a one-time token at startup:
+
+```
+[setup] Setup token: 0123456789abcdef0123456789abcdef
+```
+
+- `POST /setup/test-db`, `/setup/test-redis` and `/setup/install` require header `X-Setup-Token: <token>` (whitespace trimmed, constant-time compare).
+- Missing → 401 `SETUP_TOKEN_REQUIRED`; wrong → 403 `SETUP_TOKEN_INVALID`; 10 wrong attempts per direct client IP within 15 minutes → 429 `SETUP_TOKEN_RATE_LIMITED` with `Retry-After`.
+- The rate-limit key is the TCP peer address; `X-Forwarded-For` is ignored for this check.
+- `GET /setup/status` stays public and returns `setup_token_required: true`.
+- The token is regenerated on each restart and is not persisted. `AUTO_SETUP` (Docker env-based install) does not use the HTTP wizard and is unaffected.
