@@ -63,6 +63,10 @@ const (
 // 可通过 gateway.upstream_response_read_max_bytes 配置项覆盖。
 const DefaultUpstreamResponseReadMaxBytes int64 = 128 * 1024 * 1024
 
+// DefaultGatewayMaxLineSize 上游 SSE 单行默认上限（M-6/D5a：由 500MB 下调为 16MB）。
+// 超大 base64 图片等场景可通过 gateway.max_line_size 调大。
+const DefaultGatewayMaxLineSize = 16 * 1024 * 1024
+
 // DefaultModelsListReadMaxBytes 上游模型列表响应体的默认读取上限。
 // 可通过 gateway.models_list_read_max_bytes 配置项覆盖。
 const DefaultModelsListReadMaxBytes int64 = 8 * 1024 * 1024
@@ -2653,7 +2657,7 @@ func setDefaults() {
 	viper.SetDefault("gateway.image_stream_data_interval_timeout", 900)
 	viper.SetDefault("gateway.image_stream_keepalive_interval", 10)
 	viper.SetDefault("gateway.image_nonstream_keepalive_interval", 0)
-	viper.SetDefault("gateway.max_line_size", 500*1024*1024)
+	viper.SetDefault("gateway.max_line_size", DefaultGatewayMaxLineSize) // M-6/D5a: 16MB
 	viper.SetDefault("gateway.scheduling.sticky_session_max_waiting", 3)
 	viper.SetDefault("gateway.scheduling.sticky_session_wait_timeout", 120*time.Second)
 	viper.SetDefault("gateway.scheduling.fallback_wait_timeout", 30*time.Second)

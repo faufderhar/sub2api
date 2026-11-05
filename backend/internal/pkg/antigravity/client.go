@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/proxyurl"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/proxyutil"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/servertiming"
@@ -374,7 +375,7 @@ func (c *Client) ExchangeCode(ctx context.Context, code, codeVerifier string) (*
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	bodyBytes, err := io.ReadAll(resp.Body)
+	bodyBytes, err := httputil.ReadResponseBody(resp.Body, httputil.DefaultResponseBodyMaxBytes)
 	if err != nil {
 		return nil, fmt.Errorf("读取响应失败: %w", err)
 	}
@@ -416,7 +417,7 @@ func (c *Client) RefreshToken(ctx context.Context, refreshToken string) (*TokenR
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	bodyBytes, err := io.ReadAll(resp.Body)
+	bodyBytes, err := httputil.ReadResponseBody(resp.Body, httputil.DefaultResponseBodyMaxBytes)
 	if err != nil {
 		return nil, fmt.Errorf("读取响应失败: %w", err)
 	}
@@ -447,7 +448,7 @@ func (c *Client) GetUserInfo(ctx context.Context, accessToken string) (*UserInfo
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	bodyBytes, err := io.ReadAll(resp.Body)
+	bodyBytes, err := httputil.ReadResponseBody(resp.Body, httputil.DefaultResponseBodyMaxBytes)
 	if err != nil {
 		return nil, fmt.Errorf("读取响应失败: %w", err)
 	}
@@ -502,7 +503,7 @@ func (c *Client) LoadCodeAssist(ctx context.Context, accessToken string) (*LoadC
 			return nil, nil, lastErr
 		}
 
-		respBodyBytes, err := io.ReadAll(resp.Body)
+		respBodyBytes, err := httputil.ReadResponseBody(resp.Body, httputil.DefaultResponseBodyMaxBytes)
 		_ = resp.Body.Close() // 立即关闭，避免循环内 defer 导致的资源泄漏
 		if err != nil {
 			return nil, nil, fmt.Errorf("读取响应失败: %w", err)
@@ -581,7 +582,7 @@ func (c *Client) OnboardUser(ctx context.Context, accessToken, tierID string) (s
 				return "", lastErr
 			}
 
-			respBodyBytes, err := io.ReadAll(resp.Body)
+			respBodyBytes, err := httputil.ReadResponseBody(resp.Body, httputil.DefaultResponseBodyMaxBytes)
 			_ = resp.Body.Close()
 			if err != nil {
 				return "", fmt.Errorf("读取响应失败: %w", err)
@@ -892,7 +893,7 @@ func (c *Client) SetUserSettings(ctx context.Context, accessToken string) (*SetU
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	respBody, err := io.ReadAll(resp.Body)
+	respBody, err := httputil.ReadResponseBody(resp.Body, httputil.DefaultResponseBodyMaxBytes)
 	if err != nil {
 		return nil, fmt.Errorf("读取响应失败: %w", err)
 	}
@@ -935,7 +936,7 @@ func (c *Client) FetchUserInfo(ctx context.Context, accessToken, projectID strin
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	respBody, err := io.ReadAll(resp.Body)
+	respBody, err := httputil.ReadResponseBody(resp.Body, httputil.DefaultResponseBodyMaxBytes)
 	if err != nil {
 		return nil, fmt.Errorf("读取响应失败: %w", err)
 	}

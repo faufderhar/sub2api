@@ -16,3 +16,11 @@ func TestRound2_PoolDefaults(t *testing.T) {
 	require.Equal(t, 128, cfg.Redis.PoolSize)
 	require.Equal(t, 10, cfg.Redis.MinIdleConns)
 }
+
+// M-6 / D5a: SSE max line size defaults to 16MB.
+func TestRound2_MaxLineSizeDefault(t *testing.T) {
+	resetViperWithJWTSecret(t)
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.Equal(t, 16*1024*1024, cfg.Gateway.MaxLineSize)
+}

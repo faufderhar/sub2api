@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -15,6 +14,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/geminicli"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/httpclient"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 )
 
@@ -1054,7 +1054,7 @@ func fetchProjectIDFromResourceManager(ctx context.Context, accessToken, proxyUR
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	bodyBytes, err := io.ReadAll(resp.Body)
+	bodyBytes, err := httputil.ReadResponseBody(resp.Body, httputil.SmallResponseBodyMaxBytes)
 	if err != nil {
 		return "", fmt.Errorf("failed to read resource manager response: %w", err)
 	}

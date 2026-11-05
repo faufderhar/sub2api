@@ -616,9 +616,10 @@ gateway:
     # Max image requests waiting in this process when overflow_mode=wait, 0=unlimited
     # wait 模式当前进程允许排队等待的图片请求数，0=不限制
     max_waiting_requests: 100
-  # SSE max line size in bytes (default: 40MB)
-  # SSE 单行最大字节数（默认 40MB）
-  max_line_size: 41943040
+  # SSE max line size in bytes (default: 16MB; raise it if upstreams emit very large
+  # single SSE lines, e.g. huge base64 images)
+  # SSE 单行最大字节数（默认 16MB；上游单行特别大时（如超大 base64 图片）可调大）
+  max_line_size: 16777216
   # Log upstream error response body summary (safe/truncated; does not log request content)
   # 记录上游错误响应体摘要（安全/截断；不记录请求内容）
   log_upstream_error_body: true
