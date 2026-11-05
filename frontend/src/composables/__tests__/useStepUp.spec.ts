@@ -5,6 +5,7 @@ import {
   isStepUpBlocked,
   isStepUpCancelled,
   stepUpBlockReason,
+  stepUpBlockedMessage,
   StepUpCancelledError
 } from '../useStepUp'
 
@@ -25,6 +26,35 @@ describe('useStepUp error classification', () => {
   it('surfaces the block reason marker', () => {
     expect(stepUpBlockReason({ reason: 'STEP_UP_ADMIN_API_KEY_FORBIDDEN' })).toBe('STEP_UP_ADMIN_API_KEY_FORBIDDEN')
     expect(stepUpBlockReason({ code: 'OTHER' })).toBe('')
+  })
+
+  it('reads semantic reason when code is numeric HTTP status (round-2 envelope)', () => {
+    expect(
+      isStepUpRequired({ status: 403, code: 403, reason: 'STEP_UP_REQUIRED' })
+    ).toBe(true)
+    expect(
+      isStepUpBlocked({ status: 403, code: 403, reason: 'STEP_UP_TOTP_NOT_ENABLED' })
+    ).toBe(true)
+  })
+
+  it('prefers backend message for blocked step-up errors', () => {
+    const t = (key: string) => `i18n:${key}`
+    expect(
+      stepUpBlockedMessage(
+        {
+          status: 403,
+          reason: 'STEP_UP_TOTP_NOT_ENABLED',
+          message: '请先在个人设置中开启两步验证（TOTP）后再执行此操作'
+        },
+        t
+      )
+    ).toBe('请先在个人设置中开启两步验证（TOTP）后再执行此操作')
+    expect(
+      stepUpBlockedMessage({ reason: 'STEP_UP_ADMIN_API_KEY_FORBIDDEN' }, t)
+    ).toBe('i18n:stepUp.adminApiKeyForbidden')
+    expect(stepUpBlockedMessage({ reason: 'STEP_UP_TOTP_NOT_ENABLED' }, t)).toBe(
+      'i18n:stepUp.notEnabled'
+    )
   })
 })
 

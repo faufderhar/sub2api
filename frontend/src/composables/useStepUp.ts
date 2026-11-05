@@ -62,6 +62,24 @@ export function stepUpBlockReason(err: unknown): string {
   return markerOf(err)
 }
 
+/**
+ * User-facing text for a blocked step-up error.
+ * Prefers the backend envelope `message` (contract: safe to show as-is),
+ * then falls back to i18n keys for offline / legacy responses.
+ */
+export function stepUpBlockedMessage(
+  err: unknown,
+  t: (key: string) => string
+): string {
+  const e = (err ?? {}) as ApiError
+  if (typeof e.message === 'string' && e.message.trim()) {
+    return e.message.trim()
+  }
+  return stepUpBlockReason(err) === STEP_UP_ADMIN_API_KEY_FORBIDDEN
+    ? t('stepUp.adminApiKeyForbidden')
+    : t('stepUp.notEnabled')
+}
+
 export type StepUpController = ReturnType<typeof useStepUp>
 
 export function useStepUp() {

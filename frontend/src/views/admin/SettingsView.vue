@@ -9014,7 +9014,7 @@ import {
   useStepUp,
   isStepUpCancelled,
   isStepUpBlocked,
-  stepUpBlockReason,
+  stepUpBlockedMessage,
 } from "@/composables/useStepUp";
 import AdminAccessKeysSettings from "@/components/admin/settings/AdminAccessKeysSettings.vue";
 import TotpStepUpDialog from "@/components/auth/TotpStepUpDialog.vue";
@@ -11906,11 +11906,7 @@ async function saveSettings() {
       return;
     }
     if (isStepUpBlocked(error)) {
-      appStore.showError(
-        stepUpBlockReason(error) === "STEP_UP_ADMIN_API_KEY_FORBIDDEN"
-          ? t("stepUp.adminApiKeyForbidden")
-          : t("stepUp.notEnabled"),
-      );
+      appStore.showError(stepUpBlockedMessage(error, t));
       return;
     }
     // 开启 step-up 开关但本人未启用 2FA：给出可操作的专用提示
