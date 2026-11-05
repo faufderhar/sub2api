@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"time"
 
 	"github.com/pquerna/otp"
@@ -270,7 +271,7 @@ func (s *TotpService) CompleteSetup(ctx context.Context, userID int64, totpCode,
 		return ErrServiceUnavailable
 	}
 	if !allowed {
-		return ErrTotpTooManyAttempts
+		return s.tooManyAttemptsError(ctx, userID)
 	}
 
 	// Verify the TOTP code
@@ -363,7 +364,7 @@ func (s *TotpService) VerifyCode(ctx context.Context, userID int64, code string)
 		return ErrServiceUnavailable
 	}
 	if !allowed {
-		return ErrTotpTooManyAttempts
+		return s.tooManyAttemptsError(ctx, userID)
 	}
 
 	// Get user
@@ -610,4 +611,42 @@ func (s *TotpService) SendVerifyCode(ctx context.Context, userID int64, locale .
 
 	// Send verification code via queue
 	return s.emailQueueService.EnqueueVerifyCode(user.Email, siteName, firstEmailLocale(locale))
+}
+
+// TotpAttemptTTLReader 是 TotpCache 的可选扩展：返回按用户尝试计数窗口的剩余时间。
+// 返回 0 表示未知（键不存在或无过期时间）。
+type TotpAttemptTTLReader interface {
+	GetVerifyAttemptsTTL(ctx context.Context, userID int64) (time.Duration, error)
+}
+
+// TotpRetryAfterMetadataKey 是 429 TOTP_TOO_MANY_ATTEMPTS 错误 metadata 中的剩余秒数，
+// response.ErrorFrom 会据此写 Retry-After 响应头（BD2-4）。
+const TotpRetryAfterMetadataKey = "retry_after"
+
+// tooManyAttemptsError 返回带剩余锁定秒数的 ErrTotpTooManyAttempts（BD2-4）。
+// 剩余 TTL 不可得时回退为整个窗口长度。
+func (s *TotpService) tooManyAttemptsError(ctx context.Context, userID int64) error {
+	return ErrTotpTooManyAttempts.WithMetadata(map[string]string{
+		TotpRetryAfterMetadataKey: strconv.Itoa(totpRetryAfterSeconds(ctx, s.cache, userID)),
+	})
+}
+
+func totpRetryAfterSeconds(ctx context.Context, cache TotpCache, userID int64) int {
+	fallback := int(totpAttemptsTTL / time.Second)
+	reader, ok := cache.(TotpAttemptTTLReader)
+	if !ok {
+		return fallback
+	}
+	ttl, err := reader.GetVerifyAttemptsTTL(ctx, userID)
+	if err != nil || ttl <= 0 {
+		return fallback
+	}
+	secs := int((ttl + time.Second - 1) / time.Second)
+	if secs < 1 {
+		secs = 1
+	}
+	if secs > fallback {
+		secs = fallback
+	}
+	return secs
 }

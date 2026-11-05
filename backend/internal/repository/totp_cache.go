@@ -144,6 +144,20 @@ func (c *TotpCache) GetVerifyAttempts(ctx context.Context, userID int64) (int, e
 	return count, nil
 }
 
+// GetVerifyAttemptsTTL 返回尝试计数窗口的剩余时间（BD2-4，用于 Retry-After）。
+// 键不存在或无过期时间时返回 0（未知）。
+func (c *TotpCache) GetVerifyAttemptsTTL(ctx context.Context, userID int64) (time.Duration, error) {
+	key := fmt.Sprintf("%s%d", totpAttemptsKeyPrefix, userID)
+	ttl, err := c.rdb.PTTL(ctx, key).Result()
+	if err != nil {
+		return 0, fmt.Errorf("get verify attempts ttl: %w", err)
+	}
+	if ttl < 0 {
+		return 0, nil
+	}
+	return ttl, nil
+}
+
 // ClearVerifyAttempts clears the verify attempt counter
 func (c *TotpCache) ClearVerifyAttempts(ctx context.Context, userID int64) error {
 	key := fmt.Sprintf("%s%d", totpAttemptsKeyPrefix, userID)

@@ -92,6 +92,15 @@ func ErrorFrom(c *gin.Context, err error) bool {
 		log.Printf("[ERROR] %s %s\n  Error: %s", c.Request.Method, c.Request.URL.Path, logredact.RedactText(err.Error()))
 	}
 
+	// BD2-4：429 错误若在 metadata 中带 retry_after（正整数秒），同步写 Retry-After 响应头。
+	if statusCode == http.StatusTooManyRequests {
+		if v, ok := status.Metadata["retry_after"]; ok {
+			if secs, convErr := strconv.Atoi(v); convErr == nil && secs > 0 {
+				c.Header("Retry-After", strconv.Itoa(secs))
+			}
+		}
+	}
+
 	ErrorWithDetails(c, statusCode, status.Message, status.Reason, status.Metadata)
 	return true
 }
