@@ -6,7 +6,7 @@ import (
 )
 
 // QuotePostgresDSNValue 按 libpq key/value 连接串规则给值加单引号：反斜杠和单引号用反斜杠转义。
-// 加引号后空值（password=''）、含空格或引号的值都不会吞掉后面的参数（如 dbname）。
+// 加引号后空值（空密码）、含空格或引号的值都不会吞掉后面的参数（如 dbname）。
 func QuotePostgresDSNValue(value string) string {
 	var b strings.Builder
 	b.Grow(len(value) + 2)
