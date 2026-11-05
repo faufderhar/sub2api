@@ -52,6 +52,11 @@ func ProvideRouter(
 	r.Use(middleware2.Recovery())
 	configureTrustedProxies(r, cfg.Server)
 	warnLegacyForwardedIPTrust(cfg)
+	// T-5：新模式下可信直连的单值头（如 CF-Connecting-IP），默认关闭。
+	ip.SetHonorForwardedClientIPHeadersFromTrustedProxies(cfg.Security.HonorForwardedClientIPHeadersFromTrustedProxies)
+	if cfg.Security.HonorForwardedClientIPHeadersFromTrustedProxies && !ip.TrustedProxiesConfigured() {
+		log.Printf("Warning: security.honor_forwarded_client_ip_headers_from_trusted_proxies is enabled but server.trusted_proxies is empty; single-value client IP headers are ignored")
+	}
 
 	// Wire up websearch Manager builder so it initializes on startup and rebuilds on config save.
 	settingService.SetWebSearchManagerBuilder(context.Background(), func(cfg *service.WebSearchEmulationConfig, proxyURLs map[int64]string) {

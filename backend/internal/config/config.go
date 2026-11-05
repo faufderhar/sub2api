@@ -804,6 +804,11 @@ type SecurityConfig struct {
 	// （SECURITY_TRUST_FORWARDED_IP_FOR_API_KEY_ACL）显式写了该项；只用于 BD-1 一次性迁移判断。
 	TrustForwardedIPForAPIKeyACLExplicit bool     `mapstructure:"-" yaml:"-"`
 	ForwardedClientIPHeaders             []string `mapstructure:"forwarded_client_ip_headers" json:"forwarded_client_ip_headers" yaml:"forwarded_client_ip_headers"`
+	// HonorForwardedClientIPHeadersFromTrustedProxies（T-5，默认 false）：兼容开关关闭（新模式）时，
+	// 若直连地址在 server.trusted_proxies 内，按 forwarded_client_ip_headers 的顺序优先采用
+	// 「恰好一行、单个合法 IP」的单值头（如 CF-Connecting-IP），再回退到 X-Forwarded-For 链。
+	// 直连不可信时这些头一律忽略。
+	HonorForwardedClientIPHeadersFromTrustedProxies bool `mapstructure:"honor_forwarded_client_ip_headers_from_trusted_proxies"`
 	// LoginLockout 按「账号（登录邮箱）+ 客户端 IP」计数的密码登录失败锁定。
 	LoginLockout                  LoginLockoutConfig                         `mapstructure:"login_lockout"`
 	forwardedClientIPSettingsLive *atomic.Pointer[ForwardedClientIPSettings] `mapstructure:"-" json:"-" yaml:"-"`
@@ -2726,6 +2731,7 @@ func setDefaults() {
 	viper.SetDefault("gateway.tls_fingerprint.enabled", true)
 	viper.SetDefault("concurrency.ping_interval", 10)
 	viper.SetDefault("concurrency.redis_failure_policy", RedisFailurePolicyFailOpen)
+	viper.SetDefault("security.honor_forwarded_client_ip_headers_from_trusted_proxies", false)
 
 	// TokenRefresh
 	viper.SetDefault("token_refresh.enabled", true)
