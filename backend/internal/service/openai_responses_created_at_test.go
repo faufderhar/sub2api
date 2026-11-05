@@ -239,7 +239,6 @@ func TestHandleStreamingResponsePassthrough_BareErrorSynthesizedFailedCarriesCre
 }
 
 func TestProxyOpenAIWSHTTPBridgeTurn_GrokStampsMissingCreatedAt(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
 		StatusCode: http.StatusOK,
 		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
@@ -280,7 +279,6 @@ func TestProxyOpenAIWSHTTPBridgeTurn_GrokStampsMissingCreatedAt(t *testing.T) {
 }
 
 func TestProxyOpenAIWSHTTPBridgeTurn_BareErrorSynthesizedFailedCarriesCreatedAt(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	body := `data: {"type":"response.created","sequence_number":0,"response":{"id":"resp_eof","created_at":1700000000,"status":"in_progress"}}` + "\n\n" +
 		`data: {"type":"error","sequence_number":1,"error":{"code":"invalid_request","message":"bad request"}}` + "\n\n"
 	upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}}
@@ -307,7 +305,6 @@ func TestProxyOpenAIWSHTTPBridgeTurn_BareErrorSynthesizedFailedCarriesCreatedAt(
 func TestHandleNonStreamingResponse_StampsMissingCreatedAt(t *testing.T) {
 	run := func(t *testing.T, upstreamBody string) string {
 		t.Helper()
-		gin.SetMode(gin.TestMode)
 		rec := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(rec)
 		c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
@@ -333,7 +330,6 @@ func TestHandleNonStreamingResponse_StampsMissingCreatedAt(t *testing.T) {
 }
 
 func TestHandleSSEToJSON_StampsMissingCreatedAt(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)

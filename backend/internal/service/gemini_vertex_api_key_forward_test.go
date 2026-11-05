@@ -58,7 +58,6 @@ func requireVertexAPIKeyAuth(t *testing.T, req *http.Request) {
 }
 
 func TestGeminiForwardNative_VertexAPIKeyWithoutProjectUsesExpressEndpoint(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	svc, httpStub := newGeminiVertexAPIKeyTestService()
 	c, _ := newGeminiNativeTestContext(t)
 
@@ -72,7 +71,6 @@ func TestGeminiForwardNative_VertexAPIKeyWithoutProjectUsesExpressEndpoint(t *te
 }
 
 func TestGeminiMessagesCompatServiceForward_VertexAPIKeyWithProjectUsesProjectEndpoint(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	svc, httpStub := newGeminiVertexAPIKeyTestService()
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
@@ -86,7 +84,6 @@ func TestGeminiMessagesCompatServiceForward_VertexAPIKeyWithProjectUsesProjectEn
 }
 
 func TestGeminiForwardAsChatCompletions_VertexAPIKeyUsesAPIKeyHeader(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	svc, httpStub := newGeminiVertexAPIKeyTestService()
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -118,7 +115,6 @@ func (s *geminiVertex429SequenceUpstream) DoWithTLS(req *http.Request, proxyURL 
 
 // Vertex 共享容量不足的 429 在同一账号上退避重试，成功后账号状态不变；绑定显式缓存的请求同样如此。
 func TestGeminiForwardNative_VertexSharedCapacity429RetriesSameAccountWithoutCooldown(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	sharedCapacity := `{"error":{"code":429,"message":"Resource exhausted. Please try again later.","status":"RESOURCE_EXHAUSTED"}}`
 	tests := []struct {
 		name string

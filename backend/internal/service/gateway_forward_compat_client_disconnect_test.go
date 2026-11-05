@@ -162,7 +162,6 @@ func TestAnthropicCompatStreaming_IdleUpstreamEndsWithinInterval(t *testing.T) {
 	for name, handle := range compatStreamHandlers() {
 		for _, disconnect := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/client_disconnected=%t", name, disconnect), func(t *testing.T) {
-				gin.SetMode(gin.TestMode)
 				marker := "\x00never-written"
 				if disconnect {
 					marker = "second"
@@ -203,7 +202,6 @@ func TestAnthropicCompatStreaming_IdleAfterTerminalEventCompletes(t *testing.T) 
 			"stop_reason":  anthropicStreamWithoutMessageStop(),
 		} {
 			t.Run(name+"/"+streamName, func(t *testing.T) {
-				gin.SetMode(gin.TestMode)
 				rec := httptest.NewRecorder()
 				c, _ := gin.CreateTestContext(rec)
 				resp, _ := stallingAnthropicUpstream(t, stream)
@@ -253,7 +251,6 @@ func TestAnthropicCompatStreaming_ReadErrorBeforeTerminalEventFails(t *testing.T
 			{name: "after_message_stop_without_stop_reason", stream: strings.Replace(anthropicStreamWithMidStreamText(), `"delta":{"stop_reason":"end_turn"}`, `"delta":{}`, 1), wantResult: true},
 		} {
 			t.Run(name+"/"+tc.name, func(t *testing.T) {
-				gin.SetMode(gin.TestMode)
 				rec := httptest.NewRecorder()
 				c, _ := gin.CreateTestContext(rec)
 				body := io.NopCloser(&errAfterReader{data: strings.NewReader(tc.stream), err: io.ErrUnexpectedEOF})
@@ -318,7 +315,6 @@ func TestAnthropicCompatStreaming_EOFWithoutTerminalEventFails(t *testing.T) {
 			{name: "truncated_tool_use", stream: truncatedToolUse, wantErrText: "missing terminal event", wantType: "stream_incomplete"},
 		} {
 			t.Run(name+"/"+tc.name, func(t *testing.T) {
-				gin.SetMode(gin.TestMode)
 				rec := httptest.NewRecorder()
 				c, _ := gin.CreateTestContext(rec)
 
@@ -352,7 +348,6 @@ func TestAnthropicCompatStreaming_EOFWithoutTerminalEventFails(t *testing.T) {
 func TestAnthropicCompatStreaming_EOFBeforeMessageStartKeepsExistingEnding(t *testing.T) {
 	for name, handle := range compatStreamHandlers() {
 		t.Run(name, func(t *testing.T) {
-			gin.SetMode(gin.TestMode)
 			rec := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(rec)
 
@@ -368,7 +363,6 @@ func TestAnthropicCompatStreaming_EOFBeforeMessageStartKeepsExistingEnding(t *te
 func TestAnthropicCompatStreaming_DoneLineCountsAsTerminalEvent(t *testing.T) {
 	for name, handle := range compatStreamHandlers() {
 		t.Run(name, func(t *testing.T) {
-			gin.SetMode(gin.TestMode)
 			rec := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(rec)
 			stream := anthropicStreamTruncatedBeforeMessageDelta() + "data: [DONE]\n\n"
@@ -403,7 +397,6 @@ func TestAnthropicCompatStreaming_UpstreamErrorEventEndsStreamWithoutWaiting(t *
 	for name, handle := range compatStreamHandlers() {
 		for _, disconnect := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/client_disconnected=%t", name, disconnect), func(t *testing.T) {
-				gin.SetMode(gin.TestMode)
 				marker := "\x00never-written"
 				if disconnect {
 					marker = "second"
@@ -448,7 +441,6 @@ func TestAnthropicCompatStreaming_UpstreamErrorEventStopsReadingBufferedEvents(t
 	}, "\n") + "\n"
 	for name, handle := range compatStreamHandlers() {
 		t.Run(name, func(t *testing.T) {
-			gin.SetMode(gin.TestMode)
 			rec := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(rec)
 
@@ -468,7 +460,6 @@ func TestAnthropicCompatStreaming_UpstreamErrorEventStopsReadingBufferedEvents(t
 func TestAnthropicCompatStreaming_UpstreamErrorEventMessageIsSanitized(t *testing.T) {
 	for name, handle := range compatStreamHandlers() {
 		t.Run(name, func(t *testing.T) {
-			gin.SetMode(gin.TestMode)
 			rec := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(rec)
 			stream := anthropicStreamWithInBandError("upstream https://example.test/v1?key=SECRET failed", "")
@@ -486,7 +477,6 @@ func TestAnthropicCompatStreaming_UpstreamErrorEventBeforeOutputWritesNothing(t 
 	stream := "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"Overloaded\"}}\n\n"
 	for name, handle := range compatStreamHandlers() {
 		t.Run(name, func(t *testing.T) {
-			gin.SetMode(gin.TestMode)
 			rec := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(rec)
 
@@ -513,7 +503,6 @@ func TestForwardAsCompatStreaming_UpstreamErrorEventFailsOver(t *testing.T) {
 			{name: "after_output", stream: anthropicStreamWithInBandError("Overloaded", ""), wantStatus: http.StatusForbidden},
 		} {
 			t.Run(endpoint+"/"+tc.name, func(t *testing.T) {
-				gin.SetMode(gin.TestMode)
 				rec := httptest.NewRecorder()
 				c, _ := gin.CreateTestContext(rec)
 				body := `{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"hi"}],"stream":true}`
@@ -551,7 +540,6 @@ func TestForwardAsCompatStreaming_UpstreamErrorEventFailsOver(t *testing.T) {
 func TestAnthropicCompatStreaming_LineTooLongFails(t *testing.T) {
 	for name, handle := range compatStreamHandlers() {
 		t.Run(name, func(t *testing.T) {
-			gin.SetMode(gin.TestMode)
 			rec := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(rec)
 			svc := &GatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{MaxLineSize: 128 * 1024}}}
@@ -568,7 +556,6 @@ func TestAnthropicCompatStreaming_LineTooLongFails(t *testing.T) {
 }
 
 func TestHandleResponsesStreamingResponse_FailureSequenceFollowsRestoredEvents(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	stream := strings.Join([]string{
@@ -605,7 +592,6 @@ func TestHandleResponsesStreamingResponse_FailureSequenceFollowsRestoredEvents(t
 }
 
 func TestAnthropicCompatStream_ClientGoneAtStreamEndMarksDisconnected(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	// 泵 goroutine 结束与请求 ctx 取消同时就绪时 select 随机选择，多轮重复以覆盖两种选择。
 	for round := 0; round < 64; round++ {
 		c, _ := gin.CreateTestContext(httptest.NewRecorder())
@@ -628,7 +614,6 @@ func TestAnthropicCompatStreaming_RequestContextCanceledDrainsWithoutWriting(t *
 	for name, handle := range compatStreamHandlers() {
 		for _, delayed := range []bool{true, false} {
 			t.Run(fmt.Sprintf("%s/upstream_delayed=%t", name, delayed), func(t *testing.T) {
-				gin.SetMode(gin.TestMode)
 				rec := httptest.NewRecorder()
 				c, _ := gin.CreateTestContext(rec)
 				ctx, cancel := context.WithCancel(context.Background())
@@ -669,7 +654,6 @@ func TestAnthropicCompatStream_ClientDisconnectBoundsDrainWhenIntervalDisabled(t
 		{name: "interval_configured", intervalSec: 30, wantInterval: 30 * time.Second},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			gin.SetMode(gin.TestMode)
 			c, _ := gin.CreateTestContext(httptest.NewRecorder())
 			pr, pw := io.Pipe()
 			t.Cleanup(func() { _ = pw.Close(); _ = pr.Close() })
@@ -694,7 +678,6 @@ func TestAnthropicCompatStreaming_DisconnectDrainEndsWhenIntervalDisabled(t *tes
 
 	for name, handle := range compatStreamHandlers() {
 		t.Run(name, func(t *testing.T) {
-			gin.SetMode(gin.TestMode)
 			writer := &disconnectOnMarkerResponseWriter{ResponseRecorder: httptest.NewRecorder(), marker: "second"}
 			c, _ := gin.CreateTestContext(writer)
 			resp, pw := stallingAnthropicUpstream(t, anthropicStreamTruncatedBeforeMessageDelta())
@@ -728,7 +711,6 @@ func TestForwardAsCompatStreaming_IdleTimeoutTriggersStreamTimeoutHandling(t *te
 			{name: "after_stop_reason", stream: anthropicStreamWithoutMessageStop(), marker: "\x00never-written", wantOutput: 42},
 		} {
 			t.Run(endpoint+"/"+tc.name, func(t *testing.T) {
-				gin.SetMode(gin.TestMode)
 				writer := &disconnectOnMarkerResponseWriter{ResponseRecorder: httptest.NewRecorder(), marker: tc.marker}
 				c, _ := gin.CreateTestContext(writer)
 				body := `{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"hi"}],"stream":true}`
@@ -775,7 +757,6 @@ func TestForwardAsCompatStreaming_IdleTimeoutTriggersStreamTimeoutHandling(t *te
 }
 
 func TestHandleCCStreamingFromAnthropic_ClientDisconnectDrainsUpstreamUsage(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	writer := &disconnectOnMarkerResponseWriter{ResponseRecorder: httptest.NewRecorder(), marker: "second"}
 	c, _ := gin.CreateTestContext(writer)
 
@@ -803,7 +784,6 @@ func TestHandleCCStreamingFromAnthropic_ClientDisconnectDrainsUpstreamUsage(t *t
 }
 
 func TestHandleResponsesStreamingResponse_ClientDisconnectDrainsUpstreamUsage(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	writer := &disconnectOnMarkerResponseWriter{ResponseRecorder: httptest.NewRecorder(), marker: "second"}
 	c, _ := gin.CreateTestContext(writer)
 

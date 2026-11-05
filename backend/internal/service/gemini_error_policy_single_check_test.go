@@ -139,7 +139,6 @@ var geminiSingleCheckForwarders = []struct {
 }
 
 func TestGeminiForward_First401RuleHitOnlyTempUnschedules(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	for _, fw := range geminiSingleCheckForwarders {
 		t.Run(fw.name, func(t *testing.T) {
 			svc, upstream, repo := newGeminiSingleCheckService(geminiSequenceUpstreamResponse{status: http.StatusUnauthorized, body: geminiSingleCheck401Body})
@@ -157,7 +156,6 @@ func TestGeminiForward_First401RuleHitOnlyTempUnschedules(t *testing.T) {
 }
 
 func TestGeminiForward_Repeated401RuleHitEscalatesToError(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	for _, fw := range geminiSingleCheckForwarders {
 		t.Run(fw.name, func(t *testing.T) {
 			svc, _, repo := newGeminiSingleCheckService(geminiSequenceUpstreamResponse{status: http.StatusUnauthorized, body: geminiSingleCheck401Body})
@@ -173,7 +171,6 @@ func TestGeminiForward_Repeated401RuleHitEscalatesToError(t *testing.T) {
 }
 
 func TestGeminiForward_UncheckedFinalResponseIsCheckedAfterLoop(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	if testing.Short() {
 		t.Skip("包含一次 1s 的重试退避")
 	}

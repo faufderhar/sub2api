@@ -95,7 +95,6 @@ func requireGeminiImagePermissionError(t *testing.T, rec *httptest.ResponseRecor
 }
 
 func TestGeminiForwardNative_ImageGenerationDisabledGroupRejectsBeforeUpstream(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	textBody := []byte(`{"contents":[{"role":"user","parts":[{"text":"draw a cat"}]}]}`)
 	imageModalityBody := []byte(`{"contents":[{"role":"user","parts":[{"text":"draw a cat"}]}],"generationConfig":{"responseModalities":["TEXT","IMAGE"]}}`)
 
@@ -129,7 +128,6 @@ func TestGeminiForwardNative_ImageGenerationDisabledGroupRejectsBeforeUpstream(t
 }
 
 func TestGeminiForwardNative_ImageGenerationGateAllowsPermittedRequests(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	body := []byte(`{"contents":[{"role":"user","parts":[{"text":"draw a cat"}]}]}`)
 
 	cases := []struct {
@@ -157,7 +155,6 @@ func TestGeminiForwardNative_ImageGenerationGateAllowsPermittedRequests(t *testi
 }
 
 func TestGeminiCompatForward_ImageGenerationDisabledGroupRejectsBeforeUpstream(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	svc, httpStub := newGeminiVertexAPIKeyTestService()
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -173,7 +170,6 @@ func TestGeminiCompatForward_ImageGenerationDisabledGroupRejectsBeforeUpstream(t
 }
 
 func TestGeminiForwardAsChatCompletions_ImageGenerationDisabledGroupRejectsBeforeUpstream(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	svc, httpStub := newGeminiVertexAPIKeyTestService()
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -198,7 +194,6 @@ func newAntigravityImageGateAccount() *Account {
 }
 
 func TestAntigravityForwards_ImageGenerationGate(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	geminiBody := []byte(`{"contents":[{"role":"user","parts":[{"text":"draw a cat"}]}]}`)
 	claudeBody := []byte(`{"model":"my-draw","max_tokens":16,"stream":true,"messages":[{"role":"user","content":"draw a cat"}]}`)
 	chatBody := []byte(`{"model":"gemini-3-pro-image","stream":true,"messages":[{"role":"user","content":"draw a cat"}]}`)

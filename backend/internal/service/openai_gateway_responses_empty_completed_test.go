@@ -10,7 +10,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
 
@@ -19,7 +18,6 @@ import (
 // turned into a failover error instead of a successful empty reply (issue
 // #5009).
 func TestOpenAIResponsesEmptyCompletedFailsOver(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
 		StatusCode: http.StatusOK,
@@ -51,7 +49,6 @@ func TestOpenAIResponsesEmptyCompletedFailsOver(t *testing.T) {
 // TestOpenAIResponsesEmptyCompletedWithOutputSucceeds ensures streams with real
 // semantic output are untouched.
 func TestOpenAIResponsesEmptyCompletedWithOutputSucceeds(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
 		StatusCode: http.StatusOK,
@@ -85,7 +82,6 @@ func TestOpenAIResponsesEmptyCompletedWithOutputSucceeds(t *testing.T) {
 // TestOpenAIResponsesEmptyCompletedWithUsageSucceeds ensures a completed event
 // carrying usage is not mistaken for a silent refusal even without output.
 func TestOpenAIResponsesEmptyCompletedWithUsageSucceeds(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
 		StatusCode: http.StatusOK,
@@ -172,7 +168,6 @@ func TestOpenAIResponsesCompletedEventIsEmpty(t *testing.T) {
 // of the passthrough path — get the same #5009 silent-refusal failover for an
 // empty response.completed (issue #7774).
 func TestOpenAIResponsesEmptyCompletedFailsOverGrok(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
 		StatusCode: http.StatusOK,
@@ -204,7 +199,6 @@ func TestOpenAIResponsesEmptyCompletedFailsOverGrok(t *testing.T) {
 // TestOpenAIResponsesEmptyCompletedWithOutputSucceedsGrok ensures normal Grok
 // streams with real semantic output still succeed.
 func TestOpenAIResponsesEmptyCompletedWithOutputSucceedsGrok(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
 		StatusCode: http.StatusOK,

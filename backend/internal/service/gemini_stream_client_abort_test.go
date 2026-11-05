@@ -44,7 +44,6 @@ const (
 // newGeminiAbortingStreamService 返回的上游流在吐完 sse 后中断；clientGone=true 时中断伴随请求 context 取消。
 func newGeminiAbortingStreamService(t *testing.T, path string, reqBody []byte, sse string, clientGone bool) (*GeminiMessagesCompatService, *gin.Context, *httptest.ResponseRecorder) {
 	t.Helper()
-	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	reqCtx, cancel := context.WithCancel(context.Background())
@@ -214,7 +213,6 @@ func (w *geminiFailingResponseWriter) WriteHeader(int)           {}
 func (w *geminiFailingResponseWriter) Flush()                    {}
 
 func TestGeminiForwardAsChatCompletions_WriteFailureOnImageModelBillsNoImage(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	reqBody := []byte(`{"model":"gemini-3-pro-image","stream":true,"messages":[{"role":"user","content":"draw a cat"}]}`)
 	c, _ := gin.CreateTestContext(&geminiFailingResponseWriter{header: http.Header{}})
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(reqBody))

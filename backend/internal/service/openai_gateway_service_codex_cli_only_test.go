@@ -25,7 +25,6 @@ func (s *stubCodexRestrictionDetector) Detect(_ *gin.Context, _ *Account, _ Code
 }
 
 func TestOpenAIGatewayService_GetCodexClientRestrictionDetector(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	t.Run("使用注入的 detector", func(t *testing.T) {
 		expected := &stubCodexRestrictionDetector{
@@ -62,7 +61,6 @@ func TestOpenAIGatewayService_GetCodexClientRestrictionDetector(t *testing.T) {
 }
 
 func TestOpenAIGatewayService_Forward_VersionGateMessage(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	newCtx := func() (*httptest.ResponseRecorder, *gin.Context) {
 		rec := httptest.NewRecorder()
@@ -108,7 +106,6 @@ func TestOpenAIGatewayService_Forward_VersionGateMessage(t *testing.T) {
 }
 
 func TestGetAPIKeyIDFromContext(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	t.Run("context 为 nil", func(t *testing.T) {
 		require.Equal(t, int64(0), getAPIKeyIDFromContext(nil))
@@ -172,7 +169,6 @@ func TestLogCodexCLIOnlyDetection_OnlyLogsRejected(t *testing.T) {
 }
 
 func TestLogCodexCLIOnlyDetection_RejectedIncludesRequestDetails(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	logSink, restore := captureStructuredLog(t)
 	defer restore()
 	// 172.18.0.1 是 Docker 网桥上的反代，需显式加入可信代理才会解析 X-Real-IP
@@ -208,7 +204,6 @@ func TestLogCodexCLIOnlyDetection_RejectedIncludesRequestDetails(t *testing.T) {
 }
 
 func TestLogOpenAIInstructionsRequiredDebug_LogsRequestDetails(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	logSink, restore := captureStructuredLog(t)
 	defer restore()
 
@@ -243,7 +238,6 @@ func TestLogOpenAIInstructionsRequiredDebug_LogsRequestDetails(t *testing.T) {
 }
 
 func TestLogOpenAIInstructionsRequiredDebug_NonTargetErrorSkipped(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	logSink, restore := captureStructuredLog(t)
 	defer restore()
 
@@ -370,7 +364,6 @@ func TestShouldFailoverOpenAIUpstreamResponseContextWindow502(t *testing.T) {
 }
 
 func TestOpenAIGatewayService_Forward_LogsInstructionsRequiredDetails(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	logSink, restore := captureStructuredLog(t)
 	defer restore()
 
@@ -429,7 +422,6 @@ func TestOpenAIGatewayService_Forward_LogsInstructionsRequiredDetails(t *testing
 }
 
 func TestOpenAIGatewayService_Forward_TransientProcessingErrorTriggersFailover(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -477,7 +469,6 @@ func TestOpenAIGatewayService_Forward_TransientProcessingErrorTriggersFailover(t
 }
 
 func TestOpenAIGatewayService_Forward_ModelCapacityErrorTriggersFailoverAndSameAccountRetry(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)

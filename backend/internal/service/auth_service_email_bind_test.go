@@ -811,19 +811,31 @@ func (s *emailBindSettingRepoStub) Delete(context.Context, string) error {
 }
 
 type emailBindCacheStub struct {
+	// mu guards data.Attempts, which concurrent verify attempts increment (L-12).
+	mu        sync.Mutex
 	data      *service.VerificationCodeData
 	err       error
 	setEmails []string
 }
 
 func (s *emailBindCacheStub) GetVerificationCode(context.Context, string) (*service.VerificationCodeData, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.err != nil {
 		return nil, s.err
 	}
-	return s.data, nil
+	if s.data == nil {
+		return nil, nil
+	}
+	// Return a snapshot like a real cache would, so concurrent attempt
+	// increments do not race with readers (L-12).
+	cloned := *s.data
+	return &cloned, nil
 }
 
 func (s *emailBindCacheStub) SetVerificationCode(_ context.Context, email string, _ *service.VerificationCodeData, _ time.Duration) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.setEmails = append(s.setEmails, email)
 	return nil
 }
@@ -1167,6 +1179,8 @@ func cloneEmailBindUser(user *service.User) *service.User {
 }
 
 func (s *emailBindCacheStub) IncrVerificationCodeAttempts(context.Context, string) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.data == nil {
 		return 0, errors.New("verification code not found")
 	}

@@ -18,7 +18,6 @@ import (
 )
 
 func TestGrokResponseAuditNativeJSON(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
@@ -363,7 +362,6 @@ func TestGrokResponseAuditConvertedAggregateModelBoundaries(t *testing.T) {
 func TestGrokResponseAuditConvertedAggregateKeepsNonGrokTerminalOnly(t *testing.T) {
 	sse := grokAuditResponsesSSE("gpt-5.4-mini", "gpt-5.4")
 	t.Run("chat", func(t *testing.T) {
-		gin.SetMode(gin.TestMode)
 		rec := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(rec)
 		body := []byte(`{"model":"gpt-5.4","messages":[{"role":"user","content":"hi"}],"stream":false}`)
@@ -390,7 +388,6 @@ func TestGrokResponseAuditConvertedAggregateKeepsNonGrokTerminalOnly(t *testing.
 		require.NotContains(t, rec.Body.String(), "gpt-5.4-mini")
 	})
 	t.Run("messages", func(t *testing.T) {
-		gin.SetMode(gin.TestMode)
 		rec := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(rec)
 		body := []byte(`{"model":"gpt-5.4","max_tokens":32,"messages":[{"role":"user","content":"hi"}],"stream":false}`)
@@ -538,7 +535,6 @@ func grokAuditSwapWriter(c *gin.Context) *httptest.ResponseRecorder {
 }
 
 func grokAuditContext(path string) (*gin.Context, *httptest.ResponseRecorder) {
-	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodPost, path, nil)

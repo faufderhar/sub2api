@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
-	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
 
@@ -265,7 +264,6 @@ func (r *geminiBoundCacheRateLimitRepo) SetRateLimited(context.Context, int64, t
 }
 
 func TestGeminiForwardNative_BoundCacheUpstreamGatewayErrorsSkipAccountPenalty(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	for _, status := range []int{http.StatusTooManyRequests, http.StatusServiceUnavailable} {
 		t.Run(http.StatusText(status), func(t *testing.T) {
 			body := fmt.Sprintf(`{"error":{"code":%d,"message":"The account holding this cached content is temporarily unavailable","status":"UNAVAILABLE"}}`, status)
@@ -296,7 +294,6 @@ func TestGeminiForwardNative_BoundCacheUpstreamGatewayErrorsSkipAccountPenalty(t
 }
 
 func TestGeminiForwardNative_BoundCacheUpstreamGatewayErrorsRetryablePerPoolModeCodes(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	for _, tt := range []struct {
 		status    int
 		retryable bool

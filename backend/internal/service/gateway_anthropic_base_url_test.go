@@ -30,7 +30,6 @@ func gatewayAnthropicBaseURLAccount(apiBaseURLs map[string]any) *Account {
 
 func gatewayAnthropicBaseURLContext(t *testing.T) *gin.Context {
 	t.Helper()
-	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
 	return c
