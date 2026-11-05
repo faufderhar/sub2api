@@ -151,5 +151,34 @@ export async function install(config: InstallRequest): Promise<InstallResponse> 
   return response.data.data
 }
 
+
+export type SetupTokenTranslate = (
+  key: string,
+  params?: Record<string, unknown>
+) => string
+
+/**
+ * FD2-14: map SETUP_TOKEN_* reasons to frontend i18n copy.
+ * Never surface the backend `message` for these codes (locale may differ).
+ * Returns null when the error is not a setup-token envelope reason.
+ */
+export function setupTokenUserMessage(
+  err: { reason?: string; retryAfter?: number },
+  t: SetupTokenTranslate
+): string | null {
+  switch (err.reason) {
+    case SETUP_TOKEN_REQUIRED:
+      return t('setup.setupToken.required')
+    case SETUP_TOKEN_INVALID:
+      return t('setup.setupToken.invalid')
+    case SETUP_TOKEN_RATE_LIMITED:
+      return t('setup.setupToken.rateLimited', {
+        seconds: err.retryAfter ?? 0
+      })
+    default:
+      return null
+  }
+}
+
 /** Exposed for unit tests. */
 export const __setupClientTestOnly = setupClient

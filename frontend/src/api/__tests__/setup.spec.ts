@@ -6,10 +6,13 @@ import {
   setSetupToken,
   getSetupToken,
   normalizeSetupError,
+  setupTokenUserMessage,
   SETUP_TOKEN_INVALID,
   SETUP_TOKEN_REQUIRED,
   SETUP_TOKEN_RATE_LIMITED
 } from '../setup'
+import enLanding from '@/i18n/locales/en/landing'
+import zhLanding from '@/i18n/locales/zh/landing'
 
 function okAdapter(data: unknown) {
   return vi.fn().mockResolvedValue({
@@ -131,5 +134,64 @@ describe('setup API (F-5)', () => {
         }
       }).reason
     ).toBe(SETUP_TOKEN_REQUIRED)
+  })
+})
+
+describe('setupTokenUserMessage (FD2-14)', () => {
+  function tFor(locale: 'en' | 'zh') {
+    const root = locale === 'en' ? enLanding : zhLanding
+    return (key: string, params?: Record<string, unknown>) => {
+      let cur: unknown = root
+      for (const part of key.split('.')) {
+        cur = (cur as Record<string, unknown>)?.[part]
+      }
+      if (typeof cur !== 'string') return key
+      if (!params) return cur
+      return cur.replace(/\{(\w+)\}/g, (_: string, name: string) =>
+        String(params[name] ?? '')
+      )
+    }
+  }
+
+  it('uses zh frontend copy for REQUIRED / INVALID / RATE_LIMITED (ignores backend message)', () => {
+    const t = tFor('zh')
+    expect(
+      setupTokenUserMessage({ reason: SETUP_TOKEN_REQUIRED, message: 'need token' } as never, t)
+    ).toBe(zhLanding.setup.setupToken.required)
+    expect(
+      setupTokenUserMessage({ reason: SETUP_TOKEN_INVALID, message: 'bad token from BE' } as never, t)
+    ).toBe(zhLanding.setup.setupToken.invalid)
+    expect(
+      setupTokenUserMessage(
+        { reason: SETUP_TOKEN_RATE_LIMITED, retryAfter: 30, message: '后端中文消息' } as never,
+        t
+      )
+    ).toBe('尝试过多，请 30 秒后再试')
+  })
+
+  it('uses en frontend copy for REQUIRED / INVALID / RATE_LIMITED', () => {
+    const t = tFor('en')
+    expect(setupTokenUserMessage({ reason: SETUP_TOKEN_REQUIRED }, t)).toBe(
+      enLanding.setup.setupToken.required
+    )
+    expect(setupTokenUserMessage({ reason: SETUP_TOKEN_INVALID }, t)).toBe(
+      enLanding.setup.setupToken.invalid
+    )
+    expect(
+      setupTokenUserMessage({ reason: SETUP_TOKEN_RATE_LIMITED, retryAfter: 45 }, t)
+    ).toBe('Too many attempts. Try again in 45s')
+  })
+
+  it('RATE_LIMITED defaults seconds to 0 when Retry-After absent', () => {
+    const t = tFor('en')
+    expect(setupTokenUserMessage({ reason: SETUP_TOKEN_RATE_LIMITED }, t)).toBe(
+      'Too many attempts. Try again in 0s'
+    )
+  })
+
+  it('returns null for non-token reasons', () => {
+    const t = tFor('en')
+    expect(setupTokenUserMessage({ reason: 'OTHER' }, t)).toBeNull()
+    expect(setupTokenUserMessage({}, t)).toBeNull()
   })
 })

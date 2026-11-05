@@ -3,7 +3,7 @@
  * Supports delay-seconds and the three HTTP-date forms from RFC 9110
  * (IMF-fixdate, RFC 850, asctime) — all interpreted as GMT/UTC.
  * Remaining seconds are clamped to [0, 86400]; NaN → 0.
- * Unparseable values return undefined.
+ * Unparseable / out-of-range HTTP-dates return undefined (treated as absent).
  */
 
 export const RETRY_AFTER_MAX_SECONDS = 86_400
@@ -56,9 +56,59 @@ function y2k(twoDigit: number): number {
   return twoDigit >= 70 ? 1900 + twoDigit : 2000 + twoDigit
 }
 
+/** Calendar days in month (month is 0–11). Handles leap years via UTC. */
+export function daysInUtcMonth(year: number, monthIndex0: number): number {
+  return new Date(Date.UTC(year, monthIndex0 + 1, 0)).getUTCDate()
+}
+
+/**
+ * FD2-11: reject values Date.UTC would silently carry (e.g. hour 25 → next day).
+ * Hour 0–23, minute 0–59, second 0–60 (leap second); day must exist in that month.
+ */
+export function isValidHttpDateParts(
+  year: number,
+  monthIndex0: number,
+  day: number,
+  hour: number,
+  minute: number,
+  second: number
+): boolean {
+  if (!Number.isInteger(year) || !Number.isInteger(monthIndex0) || !Number.isInteger(day)) {
+    return false
+  }
+  if (!Number.isInteger(hour) || !Number.isInteger(minute) || !Number.isInteger(second)) {
+    return false
+  }
+  if (monthIndex0 < 0 || monthIndex0 > 11) return false
+  if (hour < 0 || hour > 23) return false
+  if (minute < 0 || minute > 59) return false
+  if (second < 0 || second > 60) return false
+  if (day < 1 || day > daysInUtcMonth(year, monthIndex0)) return false
+  return true
+}
+
+function utcFromParts(
+  year: number,
+  monthIndex0: number,
+  day: number,
+  hour: number,
+  minute: number,
+  second: number
+): number | undefined {
+  if (!isValidHttpDateParts(year, monthIndex0, day, hour, minute, second)) {
+    return undefined
+  }
+  return Date.UTC(year, monthIndex0, day, hour, minute, second)
+}
+
 /**
  * Parse an HTTP-date string as GMT/UTC milliseconds since epoch.
  * Does not use Date.parse, so local timezone cannot shift asctime.
+ *
+ * Weekday names are matched by the regex but not cross-checked against the
+ * calendar date — RFC 9110 §5.6.7 allows recipients to ignore an incorrect
+ * weekday (lenient), so a mismatched day-of-week still parses when the
+ * numeric fields are valid (FD2-11).
  */
 export function parseHttpDateUtc(text: string): number | undefined {
   const trimmed = text.trim()
@@ -67,7 +117,7 @@ export function parseHttpDateUtc(text: string): number | undefined {
   if (m) {
     const month = monthIndex(m[2])
     if (month === undefined) return undefined
-    return Date.UTC(
+    return utcFromParts(
       Number(m[3]),
       month,
       Number(m[1]),
@@ -81,7 +131,7 @@ export function parseHttpDateUtc(text: string): number | undefined {
   if (m) {
     const month = monthIndex(m[2])
     if (month === undefined) return undefined
-    return Date.UTC(
+    return utcFromParts(
       y2k(Number(m[3])),
       month,
       Number(m[1]),
@@ -96,7 +146,7 @@ export function parseHttpDateUtc(text: string): number | undefined {
     const month = monthIndex(m[1])
     if (month === undefined) return undefined
     const day = Number(m[2].trim())
-    return Date.UTC(
+    return utcFromParts(
       Number(m[6]),
       month,
       day,

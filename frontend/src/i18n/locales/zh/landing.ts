@@ -239,6 +239,7 @@ export default {
       placeholder: '32 位十六进制 token',
       hint: '在服务启动日志中查看，格式：[setup] Setup token: <token>',
       required: '请填写 setup token',
+      invalid: 'setup token 不正确，请在服务启动日志中查看最新 token',
       rateLimited: '尝试过多，请 {seconds} 秒后再试'
     },
     ready: {

@@ -239,6 +239,7 @@ export default {
       placeholder: '32-char hex token',
       hint: 'Find it in the service startup log as: [setup] Setup token: <token>',
       required: 'Setup token is required',
+      invalid: 'Setup token is incorrect. Check the latest token in the service startup log.',
       rateLimited: 'Too many attempts. Try again in {seconds}s'
     },
     ready: {

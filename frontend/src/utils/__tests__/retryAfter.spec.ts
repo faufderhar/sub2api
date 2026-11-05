@@ -109,3 +109,53 @@ describe('parseRetryAfter (FD2-3 / FD2-6 / FD2-7)', () => {
     expect(parseRetryAfter('30s')).toBeUndefined()
   })
 })
+
+describe('parseHttpDateUtc field ranges (FD2-11)', () => {
+  it('rejects out-of-range hour / minute / second (no Date.UTC carry)', () => {
+    expect(parseHttpDateUtc('Thu, 05 Nov 2026 24:00:00 GMT')).toBeUndefined()
+    expect(parseHttpDateUtc('Thu, 05 Nov 2026 25:45:58 GMT')).toBeUndefined()
+    expect(parseHttpDateUtc('Thu, 05 Nov 2026 12:60:00 GMT')).toBeUndefined()
+    expect(parseHttpDateUtc('Thu, 05 Nov 2026 12:00:61 GMT')).toBeUndefined()
+    expect(parseHttpDateUtc('Thu, 05 Nov 2026 -1:00:00 GMT')).toBeUndefined()
+  })
+
+  it('accepts second 60 (leap second) and hour 0–23 / minute 0–59 bounds', () => {
+    expect(parseHttpDateUtc('Thu, 05 Nov 2026 00:00:00 GMT')).toBe(
+      Date.UTC(2026, 10, 5, 0, 0, 0)
+    )
+    expect(parseHttpDateUtc('Thu, 05 Nov 2026 23:59:60 GMT')).toBe(
+      Date.UTC(2026, 10, 5, 23, 59, 60)
+    )
+  })
+
+  it('rejects days that do not exist in the month (e.g. 31 Feb)', () => {
+    expect(parseHttpDateUtc('Mon, 31 Feb 2026 12:00:00 GMT')).toBeUndefined()
+    expect(parseHttpDateUtc('Tue, 31 Apr 2026 12:00:00 GMT')).toBeUndefined()
+    expect(parseHttpDateUtc('Wed, 31 Nov 2026 12:00:00 GMT')).toBeUndefined()
+    expect(parseHttpDateUtc('Sun, 00 Nov 2026 12:00:00 GMT')).toBeUndefined()
+  })
+
+  it('handles leap years for 29 Feb', () => {
+    expect(parseHttpDateUtc('Thu, 29 Feb 2024 12:00:00 GMT')).toBe(
+      Date.UTC(2024, 1, 29, 12, 0, 0)
+    )
+    expect(parseHttpDateUtc('Sat, 29 Feb 2025 12:00:00 GMT')).toBeUndefined()
+    // RFC 850 two-digit year 00 → 2000 (leap), 01 → 2001 (not)
+    expect(parseHttpDateUtc('Tuesday, 29-Feb-00 12:00:00 GMT')).toBe(
+      Date.UTC(2000, 1, 29, 12, 0, 0)
+    )
+    expect(parseHttpDateUtc('Thursday, 29-Feb-01 12:00:00 GMT')).toBeUndefined()
+  })
+
+  it('parses when weekday name mismatches the calendar date (RFC lenient)', () => {
+    // 05 Nov 2026 is Thursday; claim Sunday — still accepted.
+    expect(parseHttpDateUtc('Sun, 05 Nov 2026 08:49:37 GMT')).toBe(
+      Date.UTC(2026, 10, 5, 8, 49, 37)
+    )
+  })
+
+  it('treats invalid HTTP-date Retry-After as absent', () => {
+    expect(parseRetryAfter('Thu, 31 Feb 2026 12:00:00 GMT')).toBeUndefined()
+    expect(parseRetryAfter('Thu, 05 Nov 2026 25:00:00 GMT')).toBeUndefined()
+  })
+})

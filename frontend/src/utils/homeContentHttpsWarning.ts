@@ -1,67 +1,169 @@
-import { isHttpsAbsoluteUrl } from '@/utils/sanitize'
-
 /**
- * F-2 / FD2-4 / FD2-8：判断后台「首页内容」是否会因非 https / 明显误填而无法按 URL 嵌入。
- * - URL 模式（trim 后以 http(s):// 开头）：非 https 绝对地址则提示
- * - 明显想填地址但格式不对：整段 trim 后是不含空白的单独 token，且像
- *   javascript: / data: / 残缺 http(s): / 协议相对 //（FD2-8 收紧，避免正文误报）
- * - 富文本模式：含 src 为非 https 的 iframe 则提示（与 sanitizeHomeContent 移除规则对齐）
- * 只提示不阻止保存。
+ * Detect whether home-page content URL input should show an insecure / unsupported tip.
+ * F-2 / FD2-4 / FD2-8 / FD2-12.
  */
 
-/** Printable ASCII excluding space — URL host/path/query material. */
-const ASCII_URLISH = /^[\x21-\x7E]+$/
+/** Absolute https URL (case-insensitive scheme). */
+const ABSOLUTE_HTTPS = /^https:\/\//i
+/** Absolute http URL (insecure). */
+const ABSOLUTE_HTTP = /^http:\/\//i
 
 /**
- * FD2-8：整段内容是否像「单独填了一个地址」。
- * - trim 后不含空白、不含 `<`
- * - 以 `//` 或 `javascript:` / `data:` / 非 `://` 的 `http(s):` 开头
- * - scheme 后的其余部分须为可打印 ASCII（排除「http:说明文字」类正文）
+ * FD2-8: prose / free text must not trigger the tip.
+ * Only a single whitespace-free token that looks like a URL-ish value is considered.
+ */
+const ASCII_URLISH_REST = /^[\x21-\x7e]+$/
+
+/** Build a character-class matching whitespace + C0 controls + DEL (FD2-12). */
+function junkCharClass(): string {
+  // Avoid \xHH literals in source — eslint no-control-regex flags them.
+  const parts: string[] = ['\\s']
+  for (let c = 0; c <= 0x1f; c++) {
+    parts.push('\\u' + c.toString(16).padStart(4, '0'))
+  }
+  parts.push('\\u007f')
+  return '[' + parts.join('') + ']'
+}
+
+const JUNK = junkCharClass()
+
+/** Leading whitespace + C0 controls + DEL before scheme sniffing (FD2-12). */
+const LEADING_JUNK = new RegExp('^' + JUNK + '+')
+
+/**
+ * Scheme letters may be interleaved with whitespace / C0 / DEL (e.g. java\tscript:).
+ * Captures (schemeCharsWithJunk)(restAfterColon).
+ */
+const OBFUSCATED_SCHEME = new RegExp(
+  '^([a-zA-Z](?:' + JUNK + '*[a-zA-Z])*)' + JUNK + '*:([\\s\\S]*)$'
+)
+
+function collapseSchemeLetters(raw: string): string {
+  return raw.replace(new RegExp(JUNK + '+', 'g'), '').toLowerCase()
+}
+
+/**
+ * FD2-12: javascript / data / vbscript (and obfuscated forms) are dangerous.
+ * Not bound by the FD2-8 single-token rule — payloads may contain spaces.
+ *
+ * Conflict with prose like「data: 今日数据更新」: only treat as dangerous when the
+ * character immediately after the scheme colon is non-whitespace (or rest is empty).
+ * If the rest starts with whitespace, this rule does not fire; FD2-8 then also
+ * rejects the multi-token string, so no tip is shown.
+ */
+export function looksLikeDangerousHomeScheme(content: string): boolean {
+  const s = content.replace(LEADING_JUNK, '')
+  const m = OBFUSCATED_SCHEME.exec(s)
+  if (!m) return false
+  const scheme = collapseSchemeLetters(m[1])
+  if (scheme !== 'javascript' && scheme !== 'data' && scheme !== 'vbscript') {
+    return false
+  }
+  const rest = m[2]
+  if (rest.length === 0) return true
+  // Only dangerous when the first character after ':' is not whitespace.
+  return !/^\s/.test(rest)
+}
+
+/**
+ * FD2-12: non-http(s) schemes (file / ftp / mailto / …) on a single token →
+ * 「不支持的地址」. Still subject to FD2-8 single-token (so「ftp: 说明」does not tip).
+ * Dangerous schemes are handled by looksLikeDangerousHomeScheme instead.
+ */
+export function looksLikeUnsupportedHomeSchemeToken(trimmed: string): boolean {
+  if (!trimmed || /\s/.test(trimmed) || trimmed.includes('<')) return false
+  if (ABSOLUTE_HTTPS.test(trimmed) || ABSOLUTE_HTTP.test(trimmed)) return false
+  if (trimmed.startsWith('//')) return false
+
+  const m = /^([a-zA-Z][a-zA-Z0-9+.-]*):(.*)$/.exec(trimmed)
+  if (!m) return false
+  const scheme = m[1].toLowerCase()
+  if (
+    scheme === 'http' ||
+    scheme === 'https' ||
+    scheme === 'javascript' ||
+    scheme === 'data' ||
+    scheme === 'vbscript'
+  ) {
+    return false
+  }
+  const rest = m[2]
+  if (!rest) return true
+  return ASCII_URLISH_REST.test(rest)
+}
+
+/**
+ * FD2-4 / FD2-8: single token that looks like a malformed / incomplete URL
+ * (missing //, protocol-relative, broken https). http(s) only — dangerous and
+ * other schemes are covered elsewhere.
  */
 export function looksLikeMalformedHomeUrlToken(trimmed: string): boolean {
   if (!trimmed || /\s/.test(trimmed) || trimmed.includes('<')) return false
+  if (ABSOLUTE_HTTPS.test(trimmed) || ABSOLUTE_HTTP.test(trimmed)) return false
 
   if (trimmed.startsWith('//')) {
-    return ASCII_URLISH.test(trimmed.slice(2)) || trimmed.length === 2
+    return ASCII_URLISH_REST.test(trimmed.slice(2)) || trimmed === '//'
   }
 
-  const m = /^(javascript|data|https?):(.*)$/i.exec(trimmed)
+  const m = /^(https?):(.+)$/i.exec(trimmed)
   if (!m) return false
-
-  // Legitimate URL mode is handled by the http(s):// branch; not "malformed".
-  if (/^https?:\/\//i.test(trimmed)) return false
-
   const rest = m[2]
-  if (!rest) return true
-  return ASCII_URLISH.test(rest)
+  if (rest.startsWith('//')) return false
+  return ASCII_URLISH_REST.test(rest)
+}
+
+/** @deprecated Prefer looksLikeMalformedHomeUrlToken; kept for call-site clarity. */
+export function looksLikeMalformedHomeUrl(content: string): boolean {
+  return looksLikeMalformedHomeUrlToken(content.trim())
 }
 
 export function shouldWarnHomeContentHttp(content: string): boolean {
-  const trimmed = (content || '').trim()
+  const trimmed = content.trim()
   if (!trimmed) return false
 
-  if (/^https?:\/\//i.test(trimmed)) {
-    return !isHttpsAbsoluteUrl(trimmed)
+  // Absolute https URL — only warn if URL constructor rejects it.
+  if (ABSOLUTE_HTTPS.test(trimmed)) {
+    try {
+      // eslint-disable-next-line no-new
+      new URL(trimmed)
+      return false
+    } catch {
+      return true
+    }
   }
 
+  // Absolute http URL (insecure).
+  if (ABSOLUTE_HTTP.test(trimmed)) {
+    return true
+  }
+
+  // FD2-12 dangerous schemes (ignore single-token; allow spaced payloads).
+  if (looksLikeDangerousHomeScheme(content)) {
+    return true
+  }
+
+  // FD2-12 unsupported non-http(s) schemes (single token).
+  if (looksLikeUnsupportedHomeSchemeToken(trimmed)) {
+    return true
+  }
+
+  // FD2-4 / FD2-8 malformed http(s) / protocol-relative (single token).
   if (looksLikeMalformedHomeUrlToken(trimmed)) {
     return true
   }
 
-  // 富文本：粗检 iframe src。用 DOMParser 在浏览器/jsdom 下解析更稳。
-  if (typeof DOMParser === 'undefined') {
-    return /<iframe\b[^>]*\bsrc\s*=\s*["']?\s*http:/i.test(trimmed)
-  }
+  // Rich text: any iframe that is not clearly https will be stripped by the sanitizer.
+  if (!trimmed.includes('<')) return false
   try {
     const doc = new DOMParser().parseFromString(trimmed, 'text/html')
-    const iframes = doc.querySelectorAll('iframe')
-    for (const iframe of iframes) {
-      const src = iframe.getAttribute('src')
-      // 没有 src / 空 src / 非 https → 会被首页清洗掉，给管理员提示
-      if (!isHttpsAbsoluteUrl(src)) return true
-    }
+    const iframes = Array.from(doc.querySelectorAll('iframe'))
+    if (iframes.length === 0) return false
+    return iframes.some((el) => {
+      const src = (el.getAttribute('src') || '').trim()
+      if (!src) return true
+      return !ABSOLUTE_HTTPS.test(src)
+    })
   } catch {
-    return /<iframe\b[^>]*\bsrc\s*=\s*["']?\s*http:/i.test(trimmed)
+    return /<iframe\b/i.test(trimmed)
   }
-  return false
 }

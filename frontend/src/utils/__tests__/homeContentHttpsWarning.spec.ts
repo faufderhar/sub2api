@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import {
+  looksLikeDangerousHomeScheme,
   looksLikeMalformedHomeUrlToken,
+  looksLikeUnsupportedHomeSchemeToken,
   shouldWarnHomeContentHttp
 } from '../homeContentHttpsWarning'
 
@@ -49,10 +51,65 @@ describe('shouldWarnHomeContentHttp (F-2)', () => {
   it('FD2-8：正文 / 非地址 token 不提示（反例）', () => {
     expect(shouldWarnHomeContentHttp('data: 今日数据更新')).toBe(false)
     expect(shouldWarnHomeContentHttp('http:说明文字')).toBe(false)
-    expect(shouldWarnHomeContentHttp('ftp:/a')).toBe(false)
     expect(shouldWarnHomeContentHttp('just some text')).toBe(false)
     expect(shouldWarnHomeContentHttp('http: 说明')).toBe(false)
     expect(shouldWarnHomeContentHttp('see data:text/html,hi later')).toBe(false)
+  })
+})
+
+describe('looksLikeDangerousHomeScheme (FD2-12)', () => {
+  it('detects javascript / data / vbscript with mixed case', () => {
+    expect(looksLikeDangerousHomeScheme('JavaScript:alert(1)')).toBe(true)
+    expect(looksLikeDangerousHomeScheme('DATA:text/html,x')).toBe(true)
+    expect(looksLikeDangerousHomeScheme('VbScript:msgbox(1)')).toBe(true)
+  })
+
+  it('detects leading whitespace / control characters', () => {
+    expect(looksLikeDangerousHomeScheme('\tjavascript:alert(1)')).toBe(true)
+    expect(looksLikeDangerousHomeScheme('\n\r  data:text/html,hi')).toBe(true)
+    expect(looksLikeDangerousHomeScheme('\x00vbscript:x')).toBe(true)
+  })
+
+  it('detects whitespace / tab / newline inside the scheme name', () => {
+    expect(looksLikeDangerousHomeScheme('java\tscript:alert(1)')).toBe(true)
+    expect(looksLikeDangerousHomeScheme('java\nscript:alert(1)')).toBe(true)
+    expect(looksLikeDangerousHomeScheme('d ata:text/html,x')).toBe(true)
+  })
+
+  it('warns when payload after colon contains spaces (not bound by single-token)', () => {
+    expect(shouldWarnHomeContentHttp('javascript:alert("中")')).toBe(true)
+    expect(shouldWarnHomeContentHttp('javascript:alert("hello world")')).toBe(true)
+    expect(
+      shouldWarnHomeContentHttp('data:text/html,<script>alert(1)</script>')
+    ).toBe(true)
+  })
+
+  it('data: with whitespace immediately after colon is NOT dangerous (prose conflict)', () => {
+    // Positive: dangerous only when first char after ':' is non-whitespace
+    expect(looksLikeDangerousHomeScheme('data:text/html,hi')).toBe(true)
+    expect(looksLikeDangerousHomeScheme('data:')).toBe(true)
+    // Negative: 「data: 今日数据更新」— space after colon → not dangerous;
+    // FD2-8 single-token also rejects → overall no tip.
+    expect(looksLikeDangerousHomeScheme('data: 今日数据更新')).toBe(false)
+    expect(shouldWarnHomeContentHttp('data: 今日数据更新')).toBe(false)
+    expect(looksLikeDangerousHomeScheme('javascript: alert(1)')).toBe(false)
+  })
+})
+
+describe('looksLikeUnsupportedHomeSchemeToken (FD2-12)', () => {
+  it('tips file / ftp / mailto as unsupported on a single token', () => {
+    expect(looksLikeUnsupportedHomeSchemeToken('file:///etc/passwd')).toBe(true)
+    expect(looksLikeUnsupportedHomeSchemeToken('ftp://host/a')).toBe(true)
+    expect(looksLikeUnsupportedHomeSchemeToken('ftp:/a')).toBe(true)
+    expect(looksLikeUnsupportedHomeSchemeToken('mailto:a@b.com')).toBe(true)
+    expect(shouldWarnHomeContentHttp('ftp:/a')).toBe(true)
+    expect(shouldWarnHomeContentHttp('mailto:a@b.com')).toBe(true)
+  })
+
+  it('keeps single-token rule so spaced prose does not tip', () => {
+    expect(looksLikeUnsupportedHomeSchemeToken('ftp: 说明')).toBe(false)
+    expect(shouldWarnHomeContentHttp('ftp: 说明')).toBe(false)
+    expect(shouldWarnHomeContentHttp('mailto: hello')).toBe(false)
   })
 })
 
@@ -66,15 +123,9 @@ describe('looksLikeMalformedHomeUrlToken (FD2-8)', () => {
     expect(looksLikeMalformedHomeUrlToken('http:说明文字')).toBe(false)
   })
 
-  it('rejects unrelated schemes like ftp', () => {
-    expect(looksLikeMalformedHomeUrlToken('ftp:/a')).toBe(false)
-  })
-
-  it('accepts malformed http(s)/javascript/data and protocol-relative', () => {
+  it('accepts malformed http(s) and protocol-relative', () => {
     expect(looksLikeMalformedHomeUrlToken('https:a.com')).toBe(true)
     expect(looksLikeMalformedHomeUrlToken('http:/a.com')).toBe(true)
     expect(looksLikeMalformedHomeUrlToken('//a.com')).toBe(true)
-    expect(looksLikeMalformedHomeUrlToken('javascript:alert(1)')).toBe(true)
-    expect(looksLikeMalformedHomeUrlToken('data:text/html,hi')).toBe(true)
   })
 })
