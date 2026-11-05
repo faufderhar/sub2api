@@ -454,7 +454,10 @@ export default {
     hint: 'Enter the 6-digit code from your authenticator app to continue this sensitive operation.',
     verifyFailed: 'Verification failed, please try again',
     notEnabled: 'This operation requires two-factor authentication. Please enable TOTP in your profile first.',
-    adminApiKeyForbidden: 'Admin API keys cannot perform this operation. Use a two-factor verified admin session.'
+    adminApiKeyForbidden: 'Admin API keys cannot perform this operation. Use a two-factor verified admin session.',
+    mcpOauthForbidden: 'MCP OAuth credentials cannot perform this operation. Use a two-factor verified admin session.',
+    machineCredentialForbidden: 'Machine credentials cannot perform this operation. Use a two-factor verified admin session.',
+    unavailable: 'Step-up verification is temporarily unavailable. Please try again later.'
   },
 
   // Dashboard

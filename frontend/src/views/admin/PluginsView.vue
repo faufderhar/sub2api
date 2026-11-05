@@ -348,7 +348,7 @@ import TotpStepUpDialog from "@/components/auth/TotpStepUpDialog.vue";
 import {
   isStepUpBlocked,
   isStepUpCancelled,
-  stepUpBlockReason,
+  stepUpBlockedMessage,
   useStepUp,
 } from "@/composables/useStepUp";
 
@@ -394,11 +394,7 @@ function errorMessage(error: unknown): string {
 function reportSensitiveActionError(error: unknown): void {
   if (isStepUpCancelled(error)) return;
   if (isStepUpBlocked(error)) {
-    appStore.showError(
-      stepUpBlockReason(error) === "STEP_UP_ADMIN_API_KEY_FORBIDDEN"
-        ? t("stepUp.adminApiKeyForbidden")
-        : t("stepUp.notEnabled"),
-    );
+    appStore.showError(stepUpBlockedMessage(error, t));
     return;
   }
   appStore.showError(errorMessage(error));

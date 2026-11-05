@@ -18,6 +18,27 @@ import { ref } from 'vue'
 const STEP_UP_REQUIRED = 'STEP_UP_REQUIRED'
 const STEP_UP_TOTP_NOT_ENABLED = 'STEP_UP_TOTP_NOT_ENABLED'
 const STEP_UP_ADMIN_API_KEY_FORBIDDEN = 'STEP_UP_ADMIN_API_KEY_FORBIDDEN'
+const STEP_UP_MCP_OAUTH_FORBIDDEN = 'STEP_UP_MCP_OAUTH_FORBIDDEN'
+const STEP_UP_MACHINE_CREDENTIAL_FORBIDDEN = 'STEP_UP_MACHINE_CREDENTIAL_FORBIDDEN'
+const STEP_UP_UNAVAILABLE = 'STEP_UP_UNAVAILABLE'
+
+/** Non-retryable step-up failures: show message, do NOT open TOTP dialog. */
+const STEP_UP_BLOCKED = new Set([
+  STEP_UP_TOTP_NOT_ENABLED,
+  STEP_UP_ADMIN_API_KEY_FORBIDDEN,
+  STEP_UP_MCP_OAUTH_FORBIDDEN,
+  STEP_UP_MACHINE_CREDENTIAL_FORBIDDEN,
+  STEP_UP_UNAVAILABLE
+])
+
+/** i18n fallback when backend envelope has no message. */
+const STEP_UP_BLOCKED_I18N: Record<string, string> = {
+  [STEP_UP_TOTP_NOT_ENABLED]: 'stepUp.notEnabled',
+  [STEP_UP_ADMIN_API_KEY_FORBIDDEN]: 'stepUp.adminApiKeyForbidden',
+  [STEP_UP_MCP_OAUTH_FORBIDDEN]: 'stepUp.mcpOauthForbidden',
+  [STEP_UP_MACHINE_CREDENTIAL_FORBIDDEN]: 'stepUp.machineCredentialForbidden',
+  [STEP_UP_UNAVAILABLE]: 'stepUp.unavailable'
+}
 
 /**
  * Thrown by run() when the user dismisses the TOTP dialog.
@@ -54,8 +75,7 @@ export function isStepUpRequired(err: unknown): boolean {
 }
 
 export function isStepUpBlocked(err: unknown): boolean {
-  const m = markerOf(err)
-  return m === STEP_UP_TOTP_NOT_ENABLED || m === STEP_UP_ADMIN_API_KEY_FORBIDDEN
+  return STEP_UP_BLOCKED.has(markerOf(err))
 }
 
 export function stepUpBlockReason(err: unknown): string {
@@ -66,6 +86,7 @@ export function stepUpBlockReason(err: unknown): string {
  * User-facing text for a blocked step-up error.
  * Prefers the backend envelope `message` (contract: safe to show as-is),
  * then falls back to i18n keys for offline / legacy responses.
+ * Only STEP_UP_REQUIRED opens the TOTP dialog; blocked reasons never do.
  */
 export function stepUpBlockedMessage(
   err: unknown,
@@ -75,9 +96,8 @@ export function stepUpBlockedMessage(
   if (typeof e.message === 'string' && e.message.trim()) {
     return e.message.trim()
   }
-  return stepUpBlockReason(err) === STEP_UP_ADMIN_API_KEY_FORBIDDEN
-    ? t('stepUp.adminApiKeyForbidden')
-    : t('stepUp.notEnabled')
+  const key = STEP_UP_BLOCKED_I18N[stepUpBlockReason(err)]
+  return key ? t(key) : t('stepUp.notEnabled')
 }
 
 export type StepUpController = ReturnType<typeof useStepUp>
@@ -114,10 +134,10 @@ export function useStepUp() {
 
   /**
    * Run a sensitive action. On STEP_UP_REQUIRED, prompt for a TOTP code and
-   * retry once. STEP_UP_TOTP_NOT_ENABLED / admin-api-key errors are surfaced
-   * to the caller (they cannot be resolved by entering a code). If the user
-   * cancels the prompt, a StepUpCancelledError is thrown so callers can
-   * distinguish "user changed their mind" from real failures.
+   * retry once. Blocked step-up errors (TOTP not enabled, machine credentials,
+   * unavailable) are surfaced to the caller and never open the TOTP dialog.
+   * If the user cancels the prompt, a StepUpCancelledError is thrown so
+   * callers can distinguish "user changed their mind" from real failures.
    */
   async function run<T>(action: () => Promise<T>): Promise<T> {
     try {

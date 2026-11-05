@@ -27,8 +27,6 @@ export const HOME_IFRAME_SANDBOX_DEFAULT = [
   'allow-forms'
 ] as const
 
-const HOME_IFRAME_SANDBOX_DEFAULT_SET = new Set<string>(HOME_IFRAME_SANDBOX_DEFAULT)
-
 /**
  * A-1：iframe src 与本站同源时，默认与自定义 sandbox 都不能带 allow-same-origin。
  * 用 new URL(src, location.href) 解析；相对路径算同源。无法解析时按跨域处理（保留默认集合）。
@@ -59,10 +57,10 @@ export function resolveHomeIframeSandbox(
   src?: string | null
 ): string {
   const sameOrigin = isHomeIframeSameOrigin(src)
-  const allowed = sameOrigin
+  const allowed: string[] = sameOrigin
     ? HOME_IFRAME_SANDBOX_DEFAULT.filter((t) => t !== 'allow-same-origin')
     : [...HOME_IFRAME_SANDBOX_DEFAULT]
-  const allowedSet = new Set(allowed)
+  const allowedSet = new Set<string>(allowed)
 
   if (existing === null || existing === undefined) {
     return allowed.join(' ')

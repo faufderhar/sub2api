@@ -20,6 +20,9 @@ describe('useStepUp error classification', () => {
   it('detects blocked (non-retryable) step-up errors', () => {
     expect(isStepUpBlocked({ code: 'STEP_UP_TOTP_NOT_ENABLED' })).toBe(true)
     expect(isStepUpBlocked({ reason: 'STEP_UP_ADMIN_API_KEY_FORBIDDEN' })).toBe(true)
+    expect(isStepUpBlocked({ reason: 'STEP_UP_MCP_OAUTH_FORBIDDEN' })).toBe(true)
+    expect(isStepUpBlocked({ reason: 'STEP_UP_MACHINE_CREDENTIAL_FORBIDDEN' })).toBe(true)
+    expect(isStepUpBlocked({ status: 503, reason: 'STEP_UP_UNAVAILABLE' })).toBe(true)
     expect(isStepUpBlocked({ code: 'STEP_UP_REQUIRED' })).toBe(false)
   })
 
@@ -55,6 +58,28 @@ describe('useStepUp error classification', () => {
     expect(stepUpBlockedMessage({ reason: 'STEP_UP_TOTP_NOT_ENABLED' }, t)).toBe(
       'i18n:stepUp.notEnabled'
     )
+    expect(stepUpBlockedMessage({ reason: 'STEP_UP_MCP_OAUTH_FORBIDDEN' }, t)).toBe(
+      'i18n:stepUp.mcpOauthForbidden'
+    )
+    expect(
+      stepUpBlockedMessage({ reason: 'STEP_UP_MACHINE_CREDENTIAL_FORBIDDEN' }, t)
+    ).toBe('i18n:stepUp.machineCredentialForbidden')
+    expect(stepUpBlockedMessage({ reason: 'STEP_UP_UNAVAILABLE' }, t)).toBe(
+      'i18n:stepUp.unavailable'
+    )
+  })
+
+  it('does not open TOTP dialog for new blocked reasons', async () => {
+    const stepUp = useStepUp()
+    for (const reason of [
+      'STEP_UP_MCP_OAUTH_FORBIDDEN',
+      'STEP_UP_MACHINE_CREDENTIAL_FORBIDDEN',
+      'STEP_UP_UNAVAILABLE'
+    ]) {
+      const err = { status: reason === 'STEP_UP_UNAVAILABLE' ? 503 : 403, reason }
+      await expect(stepUp.run(async () => { throw err })).rejects.toBe(err)
+      expect(stepUp.visible.value).toBe(false)
+    }
   })
 })
 
