@@ -37,8 +37,14 @@ const (
 	TencentCaptchaRceDomain = "https://rce.tencentrio.com"
 	// TencentCaptchaWorkerSource 是天御国际站创建验证码 Web Worker 时使用的来源。
 	TencentCaptchaWorkerSource = "blob:"
-	// StripeDomain is the domain for Stripe.js SDK
-	StripeDomain = "https://*.stripe.com"
+	// StripeJSDomain is the Stripe.js SDK host (script-src / frame-src).
+	// Stripe's CSP guidance lists js.stripe.com and *.js.stripe.com only; the old
+	// https://*.stripe.com wildcard was broader than needed (R2-CSP).
+	StripeJSDomain = "https://js.stripe.com"
+	// StripeJSSubdomain covers Stripe.js sub-hosts (script-src / frame-src).
+	StripeJSSubdomain = "https://*.js.stripe.com"
+	// StripeHooksDomain hosts 3DS challenge frames (frame-src only).
+	StripeHooksDomain = "https://hooks.stripe.com"
 	// AirwallexStaticDomain 是 Airwallex 生产环境 SDK 脚本域名。
 	AirwallexStaticDomain = "https://static.airwallex.com"
 	// AirwallexCheckoutDomain 是 Airwallex 生产环境收银台元素和 iframe 域名。
@@ -71,8 +77,11 @@ var requiredCSPDirectiveValues = []struct {
 	{"frame-src", TencentCaptchaGlobalDomain},
 	{"frame-src", TencentCaptchaPrehandleDomain},
 	{"worker-src", TencentCaptchaWorkerSource},
-	{"script-src", StripeDomain},
-	{"frame-src", StripeDomain},
+	{"script-src", StripeJSDomain},
+	{"script-src", StripeJSSubdomain},
+	{"frame-src", StripeJSDomain},
+	{"frame-src", StripeJSSubdomain},
+	{"frame-src", StripeHooksDomain},
 	{"script-src", AirwallexStaticDomain},
 	{"script-src", AirwallexCheckoutDomain},
 	{"style-src", AirwallexStaticDomain},
