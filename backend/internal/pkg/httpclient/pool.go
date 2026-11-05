@@ -133,6 +133,14 @@ func buildTransport(opts Options) (*http.Transport, error) {
 		return nil, err
 	}
 	if parsed == nil {
+		// M-3：直连且要求公网时，在拨号层校验实际连接的 IP（防 DNS rebinding）。
+		// 走代理时拨的是代理地址（管理员配置，可能在内网），不在此处校验。
+		if opts.ValidateResolvedIP && !opts.AllowPrivateHosts {
+			transport.DialContext = (&net.Dialer{
+				Timeout: defaultDialTimeout,
+				Control: urlvalidator.DialControl,
+			}).DialContext
+		}
 		return transport, nil
 	}
 
