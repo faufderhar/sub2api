@@ -26,6 +26,18 @@ describe('useStepUp error classification', () => {
     expect(isStepUpBlocked({ code: 'STEP_UP_REQUIRED' })).toBe(false)
   })
 
+  it('recognizes STEP_UP_UNAVAILABLE old envelope (string code, no reason)', () => {
+    const err = {
+      status: 503,
+      code: 'STEP_UP_UNAVAILABLE',
+      message: 'Step-up verification service unavailable'
+    }
+    expect(isStepUpBlocked(err)).toBe(true)
+    expect(isStepUpRequired(err)).toBe(false)
+    const t = (key: string) => `i18n:${key}`
+    expect(stepUpBlockedMessage(err, t)).toBe('Step-up verification service unavailable')
+  })
+
   it('FD2-9：任意非 REQUIRED 的 STEP_UP_* 前缀都视为阻断', () => {
     expect(isStepUpBlocked({ reason: 'STEP_UP_FUTURE_UNKNOWN' })).toBe(true)
     expect(isStepUpBlocked({ code: 'STEP_UP_SOMETHING_NEW' })).toBe(true)
