@@ -159,11 +159,14 @@ func TestM7_PaymentConfigFieldsChangedComparators(t *testing.T) {
 		HelpText:           "hi",
 	}
 	same := UpdateSettingsRequest{
-		PaymentEnabledTypes:      []string{"wxpay", "alipay"},
+		PaymentEnabledTypes:      []string{"alipay", "wxpay"},
 		PaymentRechargeBonusMode: strPtr(""),
-		PaymentHelpText:          strPtr(" hi "),
+		PaymentHelpText:          strPtr("hi"),
 	}
 	require.False(t, paymentConfigFieldsChanged(same, cur))
+	// BD2-1：存储层原样写入，空白/顺序变化即存储变更。
+	require.True(t, paymentConfigFieldsChanged(UpdateSettingsRequest{PaymentHelpText: strPtr(" hi ")}, cur))
+	require.True(t, paymentConfigFieldsChanged(UpdateSettingsRequest{PaymentEnabledTypes: []string{"wxpay", "alipay"}}, cur))
 
 	diffTypes := UpdateSettingsRequest{PaymentEnabledTypes: []string{"alipay"}}
 	require.True(t, paymentConfigFieldsChanged(diffTypes, cur))

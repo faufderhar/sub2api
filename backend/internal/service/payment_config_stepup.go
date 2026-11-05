@@ -15,6 +15,9 @@ type VisibleMethodSettings struct {
 	WxpaySource   string
 	AlipayEnabled bool
 	WxpayEnabled  bool
+	// AlipaySourceRaw / WxpaySourceRaw 是未经归一化的原始存储值（BD2-1）。
+	AlipaySourceRaw string
+	WxpaySourceRaw  string
 }
 
 // GetVisibleMethodSettings 读取支付可见方式路由的当前值。
@@ -31,11 +34,16 @@ func (s *PaymentConfigService) GetVisibleMethodSettings(ctx context.Context) (*V
 		WxpaySource:   NormalizeVisibleMethodSource("wxpay", vals[SettingPaymentVisibleMethodWxpaySource]),
 		AlipayEnabled: vals[SettingPaymentVisibleMethodAlipayEnabled] == "true",
 		WxpayEnabled:  vals[SettingPaymentVisibleMethodWxpayEnabled] == "true",
+
+		AlipaySourceRaw: vals[SettingPaymentVisibleMethodAlipaySource],
+		WxpaySourceRaw:  vals[SettingPaymentVisibleMethodWxpaySource],
 	}, nil
 }
 
 // VisibleMethodFieldsChanged 判断请求中出现的可见方式字段是否与当前值不同。
 func VisibleMethodFieldsChanged(alipaySource, wxpaySource *string, alipayEnabled, wxpayEnabled *bool, cur VisibleMethodSettings) bool {
+	// PUT /admin/settings 路径：handler 先去空白、SettingService 再按同一规则归一化后存储，
+	// 因此按归一化结果比较即「按存储值比较」。
 	if alipaySource != nil && NormalizeVisibleMethodSource("alipay", *alipaySource) != NormalizeVisibleMethodSource("alipay", cur.AlipaySource) {
 		return true
 	}
@@ -51,9 +59,23 @@ func VisibleMethodFieldsChanged(alipaySource, wxpaySource *string, alipayEnabled
 	return false
 }
 
+// VisibleMethodFieldsChangedRawStored 用于 PUT /admin/payment/config：UpdatePaymentConfig 原样写入
+// source（不去空白、不归一化），因此请求值与原始存储值逐字比较（BD2-1）。
+func VisibleMethodFieldsChangedRawStored(alipaySource, wxpaySource *string, alipayEnabled, wxpayEnabled *bool, cur VisibleMethodSettings) bool {
+	if alipaySource != nil && *alipaySource != cur.AlipaySourceRaw {
+		return true
+	}
+	if wxpaySource != nil && *wxpaySource != cur.WxpaySourceRaw {
+		return true
+	}
+	return VisibleMethodFieldsChanged(nil, nil, alipayEnabled, wxpayEnabled, cur)
+}
+
 // PaymentConfigRequestChanged 判断 UpdatePaymentConfigRequest 的 payment 字段是否与 cur 不同
 // （不含 VisibleMethod* 字段，见 VisibleMethodFieldsChanged）。
-// 归一化：字符串去首尾空白；类型按集合；阶梯排序后比较；模式空值视为 bonus。
+// 归一化与 UpdatePaymentConfig 的存储方式一致（BD2-1）：字符串原样存储因此逐字比较
+// （recharge_bonus_notice 存储前去首尾空白，故比较前同样去空白）；enabled_types 按存储的
+// 逗号拼接结果（含顺序）比较；阶梯排序后比较；模式空值视为 bonus。
 func PaymentConfigRequestChanged(req UpdatePaymentConfigRequest, cur *PaymentConfig) bool {
 	if cur == nil {
 		return true
@@ -61,7 +83,7 @@ func PaymentConfigRequestChanged(req UpdatePaymentConfigRequest, cur *PaymentCon
 	bc := func(v *bool, c bool) bool { return v != nil && *v != c }
 	ic := func(v *int, c int) bool { return v != nil && *v != c }
 	fc := func(v *float64, c float64) bool { return v != nil && *v != c }
-	sc := func(v *string, c string) bool { return v != nil && strings.TrimSpace(*v) != strings.TrimSpace(c) }
+	sc := func(v *string, c string) bool { return v != nil && *v != c }
 	modeChanged := false
 	if req.RechargeBonusMode != nil {
 		a, _ := NormalizeRechargeBonusMode(*req.RechargeBonusMode)
@@ -74,14 +96,14 @@ func PaymentConfigRequestChanged(req UpdatePaymentConfigRequest, cur *PaymentCon
 		fc(req.DailyLimit, cur.DailyLimit) ||
 		ic(req.OrderTimeoutMin, cur.OrderTimeoutMin) ||
 		ic(req.MaxPendingOrders, cur.MaxPendingOrders) ||
-		(req.EnabledTypes != nil && !sameTrimmedStringSet(req.EnabledTypes, cur.EnabledTypes)) ||
+		(req.EnabledTypes != nil && strings.Join(req.EnabledTypes, ",") != strings.Join(cur.EnabledTypes, ",")) ||
 		bc(req.BalanceDisabled, cur.BalanceDisabled) ||
 		fc(req.BalanceRechargeMultiplier, cur.BalanceRechargeMultiplier) ||
 		fc(req.SubscriptionUSDToCNYRate, cur.SubscriptionUSDToCNYRate) ||
 		fc(req.RechargeFeeRate, cur.RechargeFeeRate) ||
 		(req.RechargeBonusTiers != nil && !sameBonusTiers(*req.RechargeBonusTiers, cur.RechargeBonusTiers)) ||
 		modeChanged ||
-		sc(req.RechargeBonusNotice, cur.RechargeBonusNotice) ||
+		(req.RechargeBonusNotice != nil && strings.TrimSpace(*req.RechargeBonusNotice) != cur.RechargeBonusNotice) ||
 		sc(req.LoadBalanceStrategy, cur.LoadBalanceStrategy) ||
 		sc(req.ProductNamePrefix, cur.ProductNamePrefix) ||
 		sc(req.ProductNameSuffix, cur.ProductNameSuffix) ||
@@ -96,8 +118,12 @@ func PaymentConfigRequestChanged(req UpdatePaymentConfigRequest, cur *PaymentCon
 		bc(req.AlipayMobilePrecreateDeepLink, cur.AlipayMobilePrecreateDeepLink)
 }
 
-// ProviderInstanceUpdateChanges 判断更新请求是否会实际修改服务商实例。
-// 敏感字段提交空值表示「保持不变」，与 mergeConfig 语义一致。
+// ProviderInstanceUpdateChanges 判断更新请求是否会实际修改服务商实例的存储值。
+//
+// BD2-1：逐字段按 UpdateProviderInstance 的实际写入方式计算「将要存储的值」再与当前存储值比较，
+// 归一化与存储完全一致（name/payment_mode/limits 原样存储因此逐字比较；supported_types 按
+// joinTypes 的结果含顺序比较；allow_user_refund 按存储时的级联规则推导；config 按 mergeConfig
+// 合并后的结果比较，敏感字段提交空值表示「保持不变」）。任何会改变存储内容的写入都需要 step-up。
 func (s *PaymentConfigService) ProviderInstanceUpdateChanges(ctx context.Context, id int64, req UpdateProviderInstanceRequest) (bool, error) {
 	if s == nil || s.entClient == nil {
 		return true, fmt.Errorf("payment config service unavailable")
@@ -106,28 +132,42 @@ func (s *PaymentConfigService) ProviderInstanceUpdateChanges(ctx context.Context
 	if err != nil {
 		return true, fmt.Errorf("load provider instance: %w", err)
 	}
-	if req.Name != nil && strings.TrimSpace(*req.Name) != strings.TrimSpace(current.Name) {
+	if req.Name != nil && *req.Name != current.Name {
 		return true, nil
 	}
 	if req.Enabled != nil && *req.Enabled != current.Enabled {
 		return true, nil
 	}
-	if req.PaymentMode != nil && strings.TrimSpace(*req.PaymentMode) != strings.TrimSpace(current.PaymentMode) {
+	if req.PaymentMode != nil && *req.PaymentMode != current.PaymentMode {
 		return true, nil
 	}
 	if req.SortOrder != nil && *req.SortOrder != current.SortOrder {
 		return true, nil
 	}
-	if req.Limits != nil && strings.TrimSpace(*req.Limits) != strings.TrimSpace(current.Limits) {
+	if req.Limits != nil && *req.Limits != current.Limits {
 		return true, nil
 	}
-	if req.RefundEnabled != nil && *req.RefundEnabled != current.RefundEnabled {
+	if req.SupportedTypes != nil && joinTypes(req.SupportedTypes) != current.SupportedTypes {
 		return true, nil
 	}
-	if req.AllowUserRefund != nil && *req.AllowUserRefund != current.AllowUserRefund {
-		return true, nil
+	nextRefund := current.RefundEnabled
+	nextAllow := current.AllowUserRefund
+	if req.RefundEnabled != nil {
+		nextRefund = *req.RefundEnabled
+		if !nextRefund {
+			nextAllow = false
+		}
 	}
-	if req.SupportedTypes != nil && !sameTrimmedStringSet(req.SupportedTypes, splitTypes(current.SupportedTypes)) {
+	if req.AllowUserRefund != nil {
+		if *req.AllowUserRefund {
+			if nextRefund {
+				nextAllow = true
+			}
+		} else {
+			nextAllow = false
+		}
+	}
+	if nextRefund != current.RefundEnabled || nextAllow != current.AllowUserRefund {
 		return true, nil
 	}
 	if req.Config != nil {
@@ -135,45 +175,29 @@ func (s *PaymentConfigService) ProviderInstanceUpdateChanges(ctx context.Context
 		if err != nil {
 			return true, fmt.Errorf("decrypt existing config: %w", err)
 		}
+		merged := make(map[string]string, len(existing)+len(req.Config))
+		for k, v := range existing {
+			merged[k] = v
+		}
 		for k, v := range req.Config {
 			if v == "" && isSensitiveProviderConfigField(current.ProviderKey, k) {
 				continue
 			}
-			if old, ok := existing[k]; !ok || old != v {
-				if !ok && v == "" {
-					continue
-				}
-				return true, nil
-			}
+			merged[k] = v
+		}
+		if !sameStringMap(existing, merged) {
+			return true, nil
 		}
 	}
 	return false, nil
 }
 
-func sameTrimmedStringSet(a, b []string) bool {
-	norm := func(in []string) []string {
-		seen := make(map[string]struct{}, len(in))
-		out := make([]string, 0, len(in))
-		for _, s := range in {
-			s = strings.TrimSpace(s)
-			if s == "" {
-				continue
-			}
-			if _, ok := seen[s]; ok {
-				continue
-			}
-			seen[s] = struct{}{}
-			out = append(out, s)
-		}
-		sort.Strings(out)
-		return out
-	}
-	na, nb := norm(a), norm(b)
-	if len(na) != len(nb) {
+func sameStringMap(a, b map[string]string) bool {
+	if len(a) != len(b) {
 		return false
 	}
-	for i := range na {
-		if na[i] != nb[i] {
+	for k, v := range a {
+		if bv, ok := b[k]; !ok || bv != v {
 			return false
 		}
 	}

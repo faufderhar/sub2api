@@ -85,7 +85,8 @@ func (h *PaymentHandler) paymentConfigRequestChanged(ctx context.Context, req se
 		if err != nil || vis == nil {
 			return true
 		}
-		if service.VisibleMethodFieldsChanged(req.VisibleMethodAlipaySource, req.VisibleMethodWxpaySource,
+		// BD2-1：此路径原样存储 source，按原始存储值逐字比较。
+		if service.VisibleMethodFieldsChangedRawStored(req.VisibleMethodAlipaySource, req.VisibleMethodWxpaySource,
 			req.VisibleMethodAlipayEnabled, req.VisibleMethodWxpayEnabled, *vis) {
 			return true
 		}
