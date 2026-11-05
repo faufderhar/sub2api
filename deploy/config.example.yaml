@@ -95,6 +95,13 @@ server:
   # Body read timeout (seconds) for the exempt large-body admin endpoints above.
   # 上述大请求体管理接口的请求体读取超时（秒）。
   api_large_body_read_timeout: 600
+  # T-3: body cap for the MCP transport route (POST /api/v1/mcp), separate from
+  # api_max_request_body_size. 0 = default 16MB; must not exceed max_request_body_size.
+  # Streamed (not buffered) and uses api_large_body_read_timeout.
+  # T-3：MCP 传输路由（POST /api/v1/mcp）的请求体上限，独立于上面的 1MB 默认值。
+  # 0 表示使用默认 16MB；不能超过 max_request_body_size。读取超时沿用 api_large_body_read_timeout。
+  # Environment / 环境变量: SERVER_MCP_MAX_REQUEST_BODY_SIZE
+  mcp_max_request_body_size: 16777216
   # HTTP/2 Cleartext (h2c) configuration
   # HTTP/2 Cleartext (h2c) 配置
   h2c:
@@ -219,12 +226,26 @@ security:
     max_failures: 10
     window_seconds: 900
     lockout_seconds: 900
+  # T-5: honor single-value client-IP headers from trusted proxies (default: false).
+  # Applies when the legacy switch above is false. When this is true and the
+  # direct peer IP is in server.trusted_proxies, the headers listed in
+  # forwarded_client_ip_headers (e.g. CF-Connecting-IP) are checked in order and
+  # used only if the header is a single line holding exactly one valid IP;
+  # otherwise the X-Forwarded-For chain (right-to-left) is used. Untrusted
+  # peers' headers are always ignored. Startup warns if this is true while
+  # server.trusted_proxies is empty.
+  # T-5：是否采信可信代理传来的单值客户端 IP 头（默认 false，在上方旧版兼容开关为 false 时生效）。
+  # 为 true 且直连地址在 server.trusted_proxies 内时，按 forwarded_client_ip_headers 顺序检查，
+  # 仅当该头恰好一行、一个合法 IP 时采用，否则回退 XFF 链（从右往左）。直连不可信时一律忽略。
+  # Environment / 环境变量: SECURITY_HONOR_FORWARDED_CLIENT_IP_HEADERS_FROM_TRUSTED_PROXIES
+  honor_forwarded_client_ip_headers_from_trusted_proxies: false
   # Optional client-IP headers for third-party CDNs, checked in list order before
-  # CF-Connecting-IP, X-Real-IP, and X-Forwarded-For. Valid only while the legacy
-  # compatibility switch above is true and the peer is a trusted proxy; maximum
+  # CF-Connecting-IP, X-Real-IP, and X-Forwarded-For. Used only when the peer is
+  # a trusted proxy and either the legacy compatibility switch or
+  # honor_forwarded_client_ip_headers_from_trusted_proxies (T-5) is true; maximum
   # 16 unique HTTP header names.
   # 第三方 CDN 的可选客户端 IP 请求头，按列表顺序优先于内置请求头解析。
-  # 仅在上方旧版兼容开关为 true 且直连地址为可信代理时生效；最多配置 16 个不重复的合法 HTTP 头名。
+  # 仅在直连地址为可信代理，且旧版兼容开关或 T-5 开关为 true 时生效；最多配置 16 个不重复的合法 HTTP 头名。
   # Environment / 环境变量: SECURITY_FORWARDED_CLIENT_IP_HEADERS=True-Client-IP,X-CDN-Client-IP
   forwarded_client_ip_headers: []
   # Example / 示例:
@@ -256,6 +277,16 @@ security:
     # Allowed hosts for CRS sync (required when using CRS sync)
     # 允许 CRS 同步的主机列表（使用 CRS 同步功能时必须配置）
     crs_hosts: []
+    # M-3 (round 2): when allow_private_hosts is false, the check also runs at
+    # dial time on the resolved IP (DNS rebinding / redirects to internal IPs are
+    # blocked) for direct connections. Blocked: loopback, RFC1918/ULA private,
+    # link-local, multicast, unspecified, and reserved ranges 0.0.0.0/8,
+    # 100.64.0.0/10 (CGNAT), 192.0.0.0/24, 192.0.2.0/24, 198.18.0.0/15,
+    # 198.51.100.0/24, 203.0.113.0/24, 240.0.0.0/4, 100::/64, 2001:db8::/32,
+    # 64:ff9b:1::/48, fec0::/10 (IPv4-mapped IPv6 is normalized first).
+    # Connections through a configured proxy are not dial-checked (the proxy may be private).
+    # M-3（第二轮）：allow_private_hosts 为 false 时，直连还会在建连时校验解析后的 IP
+    # （防 DNS rebinding / 重定向到内网）。拦截范围见上方英文；经代理的连接不在建连时校验。
     # Allow localhost/private IPs for upstream/pricing/CRS (use only in trusted networks)
     # 允许本地/私有 IP 地址用于上游/定价/CRS（仅在可信网络中使用）
     allow_private_hosts: true
@@ -328,6 +359,17 @@ gateway:
   openai_first_output_timeout_seconds: 0
   # Optional high/xhigh/max override (seconds, 0=use the standard timeout)
   openai_high_effort_first_output_timeout_seconds: 0
+  # T-4: request-body read timeout for gateway routes (seconds, 0 = disabled, default).
+  # Only bounds reading the request body; the deadline is cleared once the body
+  # is fully read, so long SSE / streaming responses are unaffected. A body that
+  # is still arriving after the timeout fails the read (the gateway answers
+  # 400 "Failed to read request body" with Connection: close).
+  # Prefer enforcing this at the edge (Nginx client_body_timeout, Caddy
+  # read_body), see deploy/EDGE_SECURITY.md.
+  # T-4：网关路由读取请求体超时（秒，0=关闭，默认）。只约束读 body，读完即解除，
+  # 不影响 SSE/流式响应。超时后读 body 失败（返回 400 并关闭连接）。建议优先在边缘层配置。
+  # Environment / 环境变量: GATEWAY_REQUEST_BODY_READ_TIMEOUT
+  request_body_read_timeout: 0
   # Max request body size in bytes (default: 256MB)
   # 请求体最大字节数（默认 256MB）
   max_body_size: 268435456
@@ -939,6 +981,16 @@ concurrency:
   # SSE ping interval during concurrency wait (seconds)
   # 并发等待期间的 SSE ping 间隔（秒）
   ping_interval: 10
+  # L-7: behavior when Redis is unavailable for concurrency/RPM checks.
+  #   fail_open  (default): allow the request (previous behavior).
+  #   fail_close: the wait queue counts as full (HTTP 429) and the RPM check
+  #               returns 503 BILLING_SERVICE_ERROR. Per-API-key slot tracking
+  #               stays fail-open either way.
+  # L-7：并发/RPM 检查时 Redis 不可用的处理。fail_open（默认，沿用旧行为）放行；
+  # fail_close 时等待队列按已满处理（429），RPM 检查返回 503 BILLING_SERVICE_ERROR；
+  # API Key 槽位跟踪始终 fail-open。
+  # Environment / 环境变量: CONCURRENCY_REDIS_FAILURE_POLICY
+  redis_failure_policy: fail_open
 
 # =============================================================================
 # Database Configuration (PostgreSQL)
@@ -954,8 +1006,11 @@ database:
   # Database username
   # 数据库用户名
   user: "postgres"
-  # Database password
-  # 数据库密码
+  # Database password. Any characters are allowed (spaces, quotes, backslashes):
+  # values are quoted/escaped in the DSN when needed, and an empty password is
+  # omitted from the DSN instead of breaking it (SETUP-DSN, round 2).
+  # 数据库密码。可包含空格、引号、反斜杠等字符，生成 DSN 时按需加引号转义；
+  # 空密码不会写进 DSN（第二轮 SETUP-DSN 修复）。
   password: "your_secure_password_here"
   # Database name
   # 数据库名称
@@ -1046,13 +1101,32 @@ jwt:
 # TOTP 双因素认证配置
 # =============================================================================
 totp:
-  # IMPORTANT: Set a fixed encryption key for TOTP secrets.
-  # 重要：设置固定的 TOTP 加密密钥。
-  # If left empty, a random key will be generated on each startup, causing all
-  # existing TOTP configurations to become invalid (users won't be able to
-  # login with 2FA).
-  # 如果留空，每次启动将生成随机密钥，导致现有的 TOTP 配置失效（用户无法使用
-  # 双因素认证登录）。
+  # Encryption key for TOTP secrets and other encrypted settings
+  # (channel-monitor API keys, plugin secrets). 64 hex chars.
+  # 用于加密 TOTP 密钥及其他加密配置（渠道监控 API Key、插件密钥）的密钥，64 位十六进制。
+  #
+  # M-5 key resolution (round 2) / 密钥来源优先级：
+  #   1. totp.encryption_key here or env TOTP_ENCRYPTION_KEY: always wins. The key
+  #      file is neither read nor changed (a warning is logged if it exists with
+  #      a different key).
+  #   2. Otherwise <DATA_DIR>/totp_encryption.key (DATA_DIR env, else /app/data
+  #      if writable, else the working dir) is used.
+  #   3. Otherwise a key is generated and saved to that file (0600, dir 0700).
+  #   4. If the file cannot be written, an ephemeral key is used and logged as
+  #      ERROR; enabling TOTP, creating channel monitors with API keys and saving
+  #      plugin secrets are then refused (ENCRYPTION_KEY_NOT_PERSISTENT).
+  #   An unreadable/invalid key file refuses startup instead of silently
+  #   generating a new key.
+  #   1. 这里或环境变量 TOTP_ENCRYPTION_KEY 显式配置时始终优先，不读也不改密钥文件
+  #      （文件存在且不一致时只打警告）。
+  #   2. 否则读取 <DATA_DIR>/totp_encryption.key。
+  #   3. 都没有时自动生成并写入该文件（0600，目录 0700）。
+  #   4. 写不了文件时使用临时密钥并记 ERROR 日志；此时拒绝开启 TOTP、创建带 API Key 的
+  #      渠道监控、保存插件密钥（ENCRYPTION_KEY_NOT_PERSISTENT）。
+  #   密钥文件内容无效时拒绝启动，不会静默换新密钥。
+  # Back up totp_encryption.key together with the database: losing it makes all
+  # stored TOTP secrets and encrypted settings unreadable.
+  # 请把 totp_encryption.key 和数据库一起备份；丢失后已存的 TOTP 及加密配置都无法解密。
   # Generate with / 生成命令: openssl rand -hex 32
   encryption_key: ""
 
