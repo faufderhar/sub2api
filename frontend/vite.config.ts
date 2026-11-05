@@ -194,7 +194,20 @@ export default defineConfig(({ mode }) => {
           target: backendUrl,
           changeOrigin: true
         },
-        '/setup': {
+        // Setup API only — keep SPA document route /setup on the Vite server.
+        '/setup/status': {
+          target: backendUrl,
+          changeOrigin: true
+        },
+        '/setup/test-db': {
+          target: backendUrl,
+          changeOrigin: true
+        },
+        '/setup/test-redis': {
+          target: backendUrl,
+          changeOrigin: true
+        },
+        '/setup/install': {
           target: backendUrl,
           changeOrigin: true
         }
