@@ -118,6 +118,9 @@ type WebSearchManagerBuilder func(cfg *WebSearchEmulationConfig, proxyURLs map[i
 
 // SettingService 系统设置服务
 type SettingService struct {
+	// forwardedIPMigrationPending（BD-7）：转发 IP 设置的启动迁移写入失败，DB 中可能仍是旧值，
+	// 运行时值（已按迁移结果设置）为准；GET 返回运行时值，下次保存时一并补写迁移标记。
+	forwardedIPMigrationPending atomic.Bool
 	scopedAdminKeyRepo          ScopedAdminKeyRepository
 	settingRepo                 SettingRepository
 	defaultSubGroupReader       DefaultSubscriptionGroupReader
@@ -322,6 +325,7 @@ func (s *SettingService) LoadForwardedClientIPSettings(ctx context.Context) erro
 	})
 	if err != nil {
 		s.cfg.SetForwardedClientIPSettings(false, nil)
+		s.forwardedIPMigrationPending.Store(true)
 		return fmt.Errorf("get forwarded client ip settings: %w", err)
 	}
 
@@ -375,9 +379,13 @@ func (s *SettingService) LoadForwardedClientIPSettings(ctx context.Context) erro
 	if len(updates) > 0 {
 		if err := s.settingRepo.SetMultiple(ctx, updates); err != nil {
 			s.cfg.SetForwardedClientIPSettings(enabled, headers)
+			s.forwardedIPMigrationPending.Store(true)
+			logger.LegacyPrintf("service.setting",
+				"Warning: forwarded client ip migration write failed; runtime value api_key_acl_trust_forwarded_ip=%t is authoritative until the next successful settings save: %v", enabled, err)
 			return errors.Join(headersErr, fmt.Errorf("migrate forwarded client ip setting: %w", err))
 		}
 	}
+	s.forwardedIPMigrationPending.Store(false)
 
 	s.cfg.SetForwardedClientIPSettings(enabled, headers)
 	return headersErr
@@ -390,7 +398,18 @@ func (s *SettingService) GetAllSettings(ctx context.Context) (*SystemSettings, e
 		return nil, fmt.Errorf("get all settings: %w", err)
 	}
 
-	return s.parseSettings(settings), nil
+	result := s.parseSettings(settings)
+	s.applyPendingForwardedIPRuntime(result)
+	return result, nil
+}
+
+// applyPendingForwardedIPRuntime（BD-7）：迁移写入失败时 DB 可能仍是旧值 true，
+// 此时对外返回运行时值，避免设置页展示 true、管理员原样保存又把运行时切回 true。
+func (s *SettingService) applyPendingForwardedIPRuntime(result *SystemSettings) {
+	if s == nil || s.cfg == nil || result == nil || !s.forwardedIPMigrationPending.Load() {
+		return
+	}
+	result.APIKeyACLTrustForwardedIP = s.cfg.TrustForwardedIPForAPIKeyACL()
 }
 
 // SetOnUpdateCallback sets a callback function to be called when settings are updated
