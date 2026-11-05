@@ -6677,6 +6677,14 @@
                 <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
                   {{ t("admin.settings.site.homeContentHint") }}
                 </p>
+                <!-- F-2：http / 非法 URL 不会在首页显示 -->
+                <p
+                  v-if="homeContentHttpWarning"
+                  data-testid="home-content-http-warning"
+                  class="mt-2 text-xs text-amber-600 dark:text-amber-400"
+                >
+                  {{ t("admin.settings.site.homeContentHttpWarning") }}
+                </p>
                 <!-- iframe CSP Warning -->
                 <p class="mt-2 text-xs text-amber-600 dark:text-amber-400">
                   {{ t("admin.settings.site.homeContentIframeWarning") }}
@@ -9012,6 +9020,7 @@ import AdminAccessKeysSettings from "@/components/admin/settings/AdminAccessKeys
 import TotpStepUpDialog from "@/components/auth/TotpStepUpDialog.vue";
 import { affiliatesAPI, type AffiliateAdminEntry, type SimpleUser as AffiliateSimpleUser } from "@/api/admin/affiliates";
 import { extractApiErrorMessage, extractI18nErrorMessage } from "@/utils/apiError";
+import { shouldWarnHomeContentHttp } from "@/utils/homeContentHttpsWarning";
 import { useAppStore } from "@/stores";
 import { useAdminSettingsStore } from "@/stores/adminSettings";
 import { normalizeVisibleMethod } from "@/components/payment/paymentFlow";
@@ -9032,6 +9041,8 @@ const { t, locale } = useI18n();
 const appStore = useAppStore();
 // 关闭 step-up 开关是敏感操作：后端返回 STEP_UP_REQUIRED 时弹 TOTP 码重试
 const settingsStepUp = useStepUp();
+
+const homeContentHttpWarning = computed(() => shouldWarnHomeContentHttp(form.home_content));
 const adminSettingsStore = useAdminSettingsStore();
 const isZhLocale = computed(() => locale.value.startsWith("zh"));
 

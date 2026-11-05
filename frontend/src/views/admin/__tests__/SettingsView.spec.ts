@@ -143,6 +143,7 @@ vi.mock("@/composables/useClipboard", () => ({
 
 vi.mock("@/utils/apiError", () => ({
   extractApiErrorMessage: () => "error",
+  extractI18nErrorMessage: () => "error",
 }));
 
 vi.mock("vue-i18n", async () => {
@@ -2125,5 +2126,56 @@ describe("admin SettingsView platform quota matrix", () => {
     const quotas = payload["default_platform_quotas"] as Record<string, Record<string, unknown>>;
     // 不管输入是什么，提交值应为 null（而非 "" 或 NaN）
     expect(quotas["anthropic"]?.["daily"]).toBe(null);
+  });
+});
+
+
+describe("admin SettingsView home content http warning (F-2)", () => {
+  beforeEach(() => {
+    getSettings.mockReset();
+    getSettings.mockResolvedValue({ ...baseSettingsResponse });
+    updateSettings.mockReset();
+    updateSettings.mockResolvedValue({ ...baseSettingsResponse });
+    fetchPublicSettings.mockResolvedValue({});
+    adminSettingsFetch.mockResolvedValue(undefined);
+  });
+
+  async function openGeneralTab(wrapper: ReturnType<typeof mountView>) {
+    const btn = wrapper
+      .findAll("button")
+      .find((node) => node.text().includes("admin.settings.tabs.general"));
+    expect(btn).toBeDefined();
+    await btn?.trigger("click");
+    await flushPromises();
+  }
+
+  it("http URL 时显示提示，https 时不显示", async () => {
+    getSettings.mockResolvedValue({
+      ...baseSettingsResponse,
+      home_content: "http://example.com/home",
+    });
+    const wrapper = mountView();
+    await flushPromises();
+    await openGeneralTab(wrapper);
+    expect(wrapper.find('[data-testid="home-content-http-warning"]').exists()).toBe(true);
+
+    const textarea = wrapper
+      .findAll("textarea")
+      .find((node) => (node.attributes("placeholder") || "").includes("homeContentPlaceholder"));
+    expect(textarea).toBeDefined();
+    await textarea!.setValue("https://example.com/home");
+    await flushPromises();
+    expect(wrapper.find('[data-testid="home-content-http-warning"]').exists()).toBe(false);
+  });
+
+  it("富文本含 http iframe 时显示提示", async () => {
+    getSettings.mockResolvedValue({
+      ...baseSettingsResponse,
+      home_content: '<p>x</p><iframe src="http://evil.example"></iframe>',
+    });
+    const wrapper = mountView();
+    await flushPromises();
+    await openGeneralTab(wrapper);
+    expect(wrapper.find('[data-testid="home-content-http-warning"]').exists()).toBe(true);
   });
 });
