@@ -261,6 +261,18 @@ func (s *TotpService) CompleteSetup(ctx context.Context, userID int64, totpCode,
 		return ErrTotpSetupExpired
 	}
 
+	// T-1：绑定校验同样接入次数限制（与登录 2FA / step-up 共用按用户计数的窗口，
+	// D10a：保持按用户，不按 IP）。先占用一次尝试再校验；占满后即使正确码也被拒。
+	// 计数存储不可用时 fail-closed。
+	allowed, err := s.cache.ReserveVerifyAttempt(ctx, userID, maxTotpAttempts)
+	if err != nil {
+		slog.Warn("totp_complete_setup_reserve_attempt_failed", "user_id", userID, "error", err)
+		return ErrServiceUnavailable
+	}
+	if !allowed {
+		return ErrTotpTooManyAttempts
+	}
+
 	// Verify the TOTP code
 	if !totp.Validate(totpCode, session.Secret) {
 		return ErrTotpInvalidCode
@@ -306,6 +318,7 @@ func (s *TotpService) CompleteSetup(ctx context.Context, userID int64, totpCode,
 
 	// Clean up the setup session
 	_ = s.cache.DeleteSetupSession(ctx, userID)
+	_ = s.cache.ClearVerifyAttempts(ctx, userID)
 
 	return nil
 }
