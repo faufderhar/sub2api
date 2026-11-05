@@ -457,7 +457,8 @@ export default {
     adminApiKeyForbidden: 'Admin API keys cannot perform this operation. Use a two-factor verified admin session.',
     mcpOauthForbidden: 'MCP OAuth credentials cannot perform this operation. Use a two-factor verified admin session.',
     machineCredentialForbidden: 'Machine credentials cannot perform this operation. Use a two-factor verified admin session.',
-    unavailable: 'Step-up verification is temporarily unavailable. Please try again later.'
+    unavailable: 'Step-up verification is temporarily unavailable. Please try again later.',
+    blocked: 'This operation requires step-up verification and cannot be completed right now.'
   },
 
   // Dashboard

@@ -22,16 +22,13 @@ const STEP_UP_MCP_OAUTH_FORBIDDEN = 'STEP_UP_MCP_OAUTH_FORBIDDEN'
 const STEP_UP_MACHINE_CREDENTIAL_FORBIDDEN = 'STEP_UP_MACHINE_CREDENTIAL_FORBIDDEN'
 const STEP_UP_UNAVAILABLE = 'STEP_UP_UNAVAILABLE'
 
-/** Non-retryable step-up failures: show message, do NOT open TOTP dialog. */
-const STEP_UP_BLOCKED = new Set([
-  STEP_UP_TOTP_NOT_ENABLED,
-  STEP_UP_ADMIN_API_KEY_FORBIDDEN,
-  STEP_UP_MCP_OAUTH_FORBIDDEN,
-  STEP_UP_MACHINE_CREDENTIAL_FORBIDDEN,
-  STEP_UP_UNAVAILABLE
-])
+/**
+ * FD2-9：除 STEP_UP_REQUIRED（以及取消哨兵）外，所有 STEP_UP_* 前缀都视为阻断：
+ * 不弹 TOTP，展示后端 message / i18n 回退。
+ */
+const STEP_UP_CANCELLED = 'STEP_UP_CANCELLED'
 
-/** i18n fallback when backend envelope has no message. */
+/** Dedicated i18n keys for known blocked reasons; others use stepUp.blocked. */
 const STEP_UP_BLOCKED_I18N: Record<string, string> = {
   [STEP_UP_TOTP_NOT_ENABLED]: 'stepUp.notEnabled',
   [STEP_UP_ADMIN_API_KEY_FORBIDDEN]: 'stepUp.adminApiKeyForbidden',
@@ -75,7 +72,12 @@ export function isStepUpRequired(err: unknown): boolean {
 }
 
 export function isStepUpBlocked(err: unknown): boolean {
-  return STEP_UP_BLOCKED.has(markerOf(err))
+  const m = markerOf(err)
+  return (
+    m.startsWith('STEP_UP_') &&
+    m !== STEP_UP_REQUIRED &&
+    m !== STEP_UP_CANCELLED
+  )
 }
 
 export function stepUpBlockReason(err: unknown): string {
@@ -97,7 +99,7 @@ export function stepUpBlockedMessage(
     return e.message.trim()
   }
   const key = STEP_UP_BLOCKED_I18N[stepUpBlockReason(err)]
-  return key ? t(key) : t('stepUp.notEnabled')
+  return key ? t(key) : t('stepUp.blocked')
 }
 
 export type StepUpController = ReturnType<typeof useStepUp>

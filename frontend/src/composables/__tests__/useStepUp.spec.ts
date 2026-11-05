@@ -26,6 +26,14 @@ describe('useStepUp error classification', () => {
     expect(isStepUpBlocked({ code: 'STEP_UP_REQUIRED' })).toBe(false)
   })
 
+  it('FD2-9：任意非 REQUIRED 的 STEP_UP_* 前缀都视为阻断', () => {
+    expect(isStepUpBlocked({ reason: 'STEP_UP_FUTURE_UNKNOWN' })).toBe(true)
+    expect(isStepUpBlocked({ code: 'STEP_UP_SOMETHING_NEW' })).toBe(true)
+    expect(isStepUpBlocked({ reason: 'STEP_UP_REQUIRED' })).toBe(false)
+    expect(isStepUpBlocked({ reason: 'OTHER' })).toBe(false)
+    expect(isStepUpBlocked(new StepUpCancelledError())).toBe(false)
+  })
+
   it('surfaces the block reason marker', () => {
     expect(stepUpBlockReason({ reason: 'STEP_UP_ADMIN_API_KEY_FORBIDDEN' })).toBe('STEP_UP_ADMIN_API_KEY_FORBIDDEN')
     expect(stepUpBlockReason({ code: 'OTHER' })).toBe('')
@@ -67,14 +75,18 @@ describe('useStepUp error classification', () => {
     expect(stepUpBlockedMessage({ reason: 'STEP_UP_UNAVAILABLE' }, t)).toBe(
       'i18n:stepUp.unavailable'
     )
+    expect(stepUpBlockedMessage({ reason: 'STEP_UP_FUTURE_UNKNOWN' }, t)).toBe(
+      'i18n:stepUp.blocked'
+    )
   })
 
-  it('does not open TOTP dialog for new blocked reasons', async () => {
+  it('does not open TOTP dialog for blocked / unknown STEP_UP_* reasons', async () => {
     const stepUp = useStepUp()
     for (const reason of [
       'STEP_UP_MCP_OAUTH_FORBIDDEN',
       'STEP_UP_MACHINE_CREDENTIAL_FORBIDDEN',
-      'STEP_UP_UNAVAILABLE'
+      'STEP_UP_UNAVAILABLE',
+      'STEP_UP_FUTURE_UNKNOWN'
     ]) {
       const err = { status: reason === 'STEP_UP_UNAVAILABLE' ? 503 : 403, reason }
       await expect(stepUp.run(async () => { throw err })).rejects.toBe(err)

@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest'
-import { shouldWarnHomeContentHttp } from '../homeContentHttpsWarning'
+import {
+  looksLikeMalformedHomeUrlToken,
+  shouldWarnHomeContentHttp
+} from '../homeContentHttpsWarning'
 
 describe('shouldWarnHomeContentHttp (F-2)', () => {
   it('https URL 不提示', () => {
@@ -35,12 +38,43 @@ describe('shouldWarnHomeContentHttp (F-2)', () => {
     expect(shouldWarnHomeContentHttp('<h1>hello</h1><p>world</p>')).toBe(false)
   })
 
-  it('FD2-4：明显误填的 URL 形态提示', () => {
+  it('FD2-4：明显误填的 URL 形态提示（正例）', () => {
     expect(shouldWarnHomeContentHttp('https:a.com')).toBe(true)
     expect(shouldWarnHomeContentHttp('http:/a.com')).toBe(true)
     expect(shouldWarnHomeContentHttp('//a.com')).toBe(true)
     expect(shouldWarnHomeContentHttp('javascript:alert(1)')).toBe(true)
     expect(shouldWarnHomeContentHttp('data:text/html,hi')).toBe(true)
+  })
+
+  it('FD2-8：正文 / 非地址 token 不提示（反例）', () => {
+    expect(shouldWarnHomeContentHttp('data: 今日数据更新')).toBe(false)
+    expect(shouldWarnHomeContentHttp('http:说明文字')).toBe(false)
+    expect(shouldWarnHomeContentHttp('ftp:/a')).toBe(false)
     expect(shouldWarnHomeContentHttp('just some text')).toBe(false)
+    expect(shouldWarnHomeContentHttp('http: 说明')).toBe(false)
+    expect(shouldWarnHomeContentHttp('see data:text/html,hi later')).toBe(false)
+  })
+})
+
+describe('looksLikeMalformedHomeUrlToken (FD2-8)', () => {
+  it('requires a single whitespace-free token', () => {
+    expect(looksLikeMalformedHomeUrlToken('data: 今日数据更新')).toBe(false)
+    expect(looksLikeMalformedHomeUrlToken('http: 说明')).toBe(false)
+  })
+
+  it('rejects non-ASCII rest after scheme (prose)', () => {
+    expect(looksLikeMalformedHomeUrlToken('http:说明文字')).toBe(false)
+  })
+
+  it('rejects unrelated schemes like ftp', () => {
+    expect(looksLikeMalformedHomeUrlToken('ftp:/a')).toBe(false)
+  })
+
+  it('accepts malformed http(s)/javascript/data and protocol-relative', () => {
+    expect(looksLikeMalformedHomeUrlToken('https:a.com')).toBe(true)
+    expect(looksLikeMalformedHomeUrlToken('http:/a.com')).toBe(true)
+    expect(looksLikeMalformedHomeUrlToken('//a.com')).toBe(true)
+    expect(looksLikeMalformedHomeUrlToken('javascript:alert(1)')).toBe(true)
+    expect(looksLikeMalformedHomeUrlToken('data:text/html,hi')).toBe(true)
   })
 })
