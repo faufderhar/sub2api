@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -36,10 +37,18 @@ func StepUpSessionKey(c *gin.Context, userID int64) string {
 	return fmt.Sprintf("u%d", userID)
 }
 
+// Step-up 失败时返回给前端的文案（与《第二轮前后端接口约定》一致，前端可直接展示）。
+const (
+	StepUpRequiredMessage          = "需要二次验证"
+	StepUpTotpNotEnabledMessage    = "请先在个人设置中开启两步验证（TOTP）后再执行此操作"
+	StepUpMachineCredentialMessage = "该操作需要已完成两步验证的管理员会话"
+)
+
 // NewStepUpAuthMiddleware 创建敏感操作 step-up 2FA 门控中间件。
 //
-// 功能开关 step_up_enabled（默认关闭）关闭时中间件直接放行，行为与门控引入前一致。
-// 开启时的通过条件（全部满足）：
+// M-7 / D2a：挂在本中间件上的路由**始终**要求 step-up，不再读取 step_up_enabled
+// 功能开关（该开关现在只影响 EnforceStepUp 的按请求内容触发的门控，如创建/提升管理员）。
+// 通过条件（全部满足）：
 //  1. 必须是 JWT 认证的真人会话——admin API key（机器凭证）一律拒绝
 //  2. 当前用户已启用 TOTP（未启用则拒绝并提示先启用 2FA）
 //  3. 当前会话在有效期内完成过 TOTP step-up 验证（POST /api/v1/user/totp/step-up）
@@ -50,7 +59,8 @@ func NewStepUpAuthMiddleware(
 	userService *service.UserService,
 	settingService *service.SettingService,
 ) StepUpAuthMiddleware {
-	return StepUpAuthMiddleware(stepUpAuth(totpService, userService, stepUpSettingsOrNil(settingService)))
+	_ = settingService // 保留参数以兼容 wire 装配；中间件不再读取功能开关（M-7/D2a）。
+	return StepUpAuthMiddleware(stepUpAuth(totpService, userService, nil))
 }
 
 // stepUpSettingsOrNil 将可能为 nil 的具体指针归一化为接口，
@@ -111,16 +121,40 @@ func MachineCredentialReason(c *gin.Context) (string, bool) {
 	}
 }
 
+// stepUpRejectMachineCredentials 控制 step-up 门控是否拒绝机器凭证（admin API key、
+// MCP OAuth 等无法完成 TOTP 的凭证）。M-7：默认拒绝。
+// 项目经理/用户若决定放行机器凭证，只需改这一处（以及 rejectMachineCredentialForStepUp）。
+var stepUpRejectMachineCredentials = true
+
+// rejectMachineCredentialForStepUp 是 step-up 门控里唯一的「机器凭证」检查，单独隔离。
+// 拒绝时写入 403 并返回 true。
+func rejectMachineCredentialForStepUp(c *gin.Context) bool {
+	if !stepUpRejectMachineCredentials {
+		return false
+	}
+	reason, machine := MachineCredentialReason(c)
+	if !machine {
+		return false
+	}
+	abortStepUp(c, 403, reason, StepUpMachineCredentialMessage)
+	return true
+}
+
+// abortStepUp 以统一错误信封写出 step-up 错误：
+// {"code": <HTTP 状态码>, "message": "...", "reason": "STEP_UP_*"}（第二轮接口约定）。
+func abortStepUp(c *gin.Context, status int, reason, message string) {
+	response.ErrorWithDetails(c, status, message, reason, nil)
+	c.Abort()
+}
+
 func enforceStepUp(c *gin.Context, grantChecker stepUpGrantChecker, userReader stepUpUserReader, settings stepUpSettingReader) bool {
-	// 功能开关关闭时直接放行（含 admin API key），恢复门控引入前的行为。
-	// settings 为 nil 时保持门控（fail-closed）：正常装配不会出现 nil。
+	// settings 非 nil 时（仅 EnforceStepUp 的按内容触发门控）功能开关关闭则放行；
+	// settings 为 nil 时始终门控（StepUpAuthMiddleware 与 EnforceStepUpAlways）。
 	if settings != nil && !settings.IsStepUpEnabled(c.Request.Context()) {
 		return true
 	}
 
-	if reason, machine := MachineCredentialReason(c); machine {
-		AbortWithError(c, 403, reason,
-			"Machine credentials cannot access this endpoint; a two-factor verified browser session is required")
+	if rejectMachineCredentialForStepUp(c) {
 		return false
 	}
 
@@ -136,8 +170,7 @@ func enforceStepUp(c *gin.Context, grantChecker stepUpGrantChecker, userReader s
 		return false
 	}
 	if !user.TotpEnabled {
-		AbortWithError(c, 403, "STEP_UP_TOTP_NOT_ENABLED",
-			"This operation requires two-factor authentication; please enable TOTP first")
+		abortStepUp(c, 403, "STEP_UP_TOTP_NOT_ENABLED", StepUpTotpNotEnabledMessage)
 		return false
 	}
 
@@ -149,8 +182,7 @@ func enforceStepUp(c *gin.Context, grantChecker stepUpGrantChecker, userReader s
 		return false
 	}
 	if !granted {
-		AbortWithError(c, 403, "STEP_UP_REQUIRED",
-			"This operation requires recent two-factor verification")
+		abortStepUp(c, 403, "STEP_UP_REQUIRED", StepUpRequiredMessage)
 		return false
 	}
 

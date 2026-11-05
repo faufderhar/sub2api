@@ -578,6 +578,13 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			return
 		}
 	}
+	// M-7：支付配置仅在字段值实际变化时要求 step-up（始终生效，不读 step_up_enabled 开关）；
+	// 未变化的常规保存不触发门控。必须在任何写入之前完成。
+	if h.paymentSettingsChanged(c.Request.Context(), req, previousSettings) {
+		if !middleware.EnforceStepUpAlways(c, h.totpService, h.userService) {
+			return
+		}
+	}
 
 	// 验证参数
 	if req.DefaultConcurrency < 1 {
