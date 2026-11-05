@@ -3,6 +3,7 @@ package repository
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/servertiming"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
@@ -38,11 +40,19 @@ func NewS3BackupStoreFactory() service.BackupObjectStoreFactory {
 	}
 }
 
+// s3InMemoryUploadMaxBytes 是 Upload(io.Reader) 一次性读入内存的上限（M-6）：1 GiB。
+// 备份流程实际使用 UploadFile 从磁盘文件上传，不受此限制。
+var s3InMemoryUploadMaxBytes int64 = 1 << 30
+
 func (s *S3BackupStore) Upload(ctx context.Context, key string, body io.Reader, contentType string) (int64, error) {
 	// 读取全部内容以获取大小（S3 PutObject 需要知道内容长度）
 	// 注意：阿里云 OSS 不兼容 s3manager 分片上传的签名方式，因此使用 PutObject
-	data, err := io.ReadAll(body)
+	// M-6：内存缓冲有上限，超过 s3InMemoryUploadMaxBytes 直接报错；大归档走 UploadFile（从文件流式上传）。
+	data, err := httputil.ReadResponseBody(body, s3InMemoryUploadMaxBytes)
 	if err != nil {
+		if errors.Is(err, httputil.ErrResponseBodyTooLarge) {
+			return 0, fmt.Errorf("backup upload body exceeds in-memory limit of %d bytes; use UploadFile: %w", s3InMemoryUploadMaxBytes, err)
+		}
 		return 0, fmt.Errorf("read body: %w", err)
 	}
 

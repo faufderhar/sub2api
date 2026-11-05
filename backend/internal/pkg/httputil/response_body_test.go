@@ -50,10 +50,8 @@ func TestReadResponseBody_EndlessBodyStopsAtLimit(t *testing.T) {
 func TestNoBareReadAllOnResponseBody(t *testing.T) {
 	root := filepath.Join("..", "..") // backend/internal
 	bare := regexp.MustCompile(`io\.ReadAll\(\s*[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*\.Body\s*\)`)
-	allowed := map[string]bool{
-		// Request bodies (bounded by the ingress body limits), not upstream responses.
-		"io.ReadAll(c.Request.Body)": true,
-	}
+	// M-6（第二轮）：grok_audio 的 io.ReadAll(c.Request.Body) 已改为有界读取，不再豁免。
+	allowed := map[string]bool{}
 	var offenders []string
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -81,6 +79,29 @@ func TestNoBareReadAllOnResponseBody(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Empty(t, offenders, "use httputil.ReadResponseBody(resp.Body, limit) instead of a bare io.ReadAll")
+}
+
+// TestNoBareReadAllInBoundedFiles（M-6 第二轮）：这些文件曾有无界 io.ReadAll（参数不是 x.Body 形式，
+// 上面的正则覆盖不到），现已改为 ReadResponseBody 有界读取；防止回退。
+func TestNoBareReadAllInBoundedFiles(t *testing.T) {
+	files := []string{
+		filepath.Join("..", "..", "repository", "backup_s3_store.go"),
+		filepath.Join("..", "..", "handler", "grok_audio.go"),
+	}
+	anyReadAll := regexp.MustCompile(`io\.ReadAll\(`)
+	for _, f := range files {
+		data, err := os.ReadFile(f)
+		require.NoError(t, err)
+		for i, line := range strings.Split(string(data), "\n") {
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, "//") {
+				continue
+			}
+			if anyReadAll.MatchString(line) && !strings.Contains(line, "io.ReadAll(io.LimitReader(") {
+				t.Errorf("%s:%d: bare io.ReadAll: %s", f, i+1, trimmed)
+			}
+		}
+	}
 }
 
 func itoa(i int) string {
