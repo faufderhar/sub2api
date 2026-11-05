@@ -436,7 +436,13 @@ func (h *PaymentHandler) CreateProvider(c *gin.Context) {
 		return
 	}
 	h.paymentService.RefreshProviders(c.Request.Context())
-	response.Created(c, inst)
+	// BD2-2：与 GET 列表同形——config 为对象且隐藏敏感字段，绝不回显原始 config。
+	resp, err := h.configService.ProviderInstanceToResponse(inst)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Created(c, resp)
 }
 
 // UpdateProvider updates an existing payment provider instance.
@@ -463,7 +469,13 @@ func (h *PaymentHandler) UpdateProvider(c *gin.Context) {
 		return
 	}
 	h.paymentService.RefreshProviders(c.Request.Context())
-	response.Success(c, inst)
+	// BD2-2：更新响应同样使用脱敏后的列表形状。
+	resp, err := h.configService.ProviderInstanceToResponse(inst)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, resp)
 }
 
 // DeleteProvider deletes a payment provider instance.
