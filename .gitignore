@@ -113,6 +113,8 @@ backend/data/
 # ===================
 backend/config.yaml
 deploy/config.yaml
+# M-5: auto-generated TOTP/AES key persisted in the data dir (never commit)
+totp_encryption.key
 backend/.installed
 
 # ===================

@@ -1046,6 +1046,9 @@ func ProvideChannelMonitorService(
 ) *ChannelMonitorService {
 	svc := NewChannelMonitorService(repo, encryptor)
 	svc.SetRuntimeReader(settingService)
+	if settingService != nil && settingService.cfg != nil {
+		svc.SetEncryptionKeyConfigured(settingService.IsTotpEncryptionKeyConfigured())
+	}
 	return svc
 }
 

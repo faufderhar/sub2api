@@ -75,6 +75,15 @@ func NewPluginManager(repo PluginRepository, encryptor SecretEncryptor, cfg *con
 	}
 }
 
+// requirePersistentEncryptionKey（M-5）：加密 key 为进程内临时 key 时拒绝写入密文。
+// cfg 为 nil（测试）时视为已配置。
+func (m *PluginManager) requirePersistentEncryptionKey() error {
+	if m != nil && m.cfg != nil && !m.cfg.Totp.EncryptionKeyConfigured {
+		return ErrEncryptionKeyNotPersistent
+	}
+	return nil
+}
+
 func (m *PluginManager) MaxUploadBytes() int64 {
 	if m == nil || m.cfg == nil {
 		return 0
@@ -700,6 +709,10 @@ func (m *PluginManager) SaveConfig(ctx context.Context, id int64, raw json.RawMe
 	if len(raw) == 0 || len(raw) > pluginConfigMaxBytes || !json.Valid(raw) {
 		return nil, errors.New("插件配置必须是有效且大小受限的 JSON")
 	}
+	// M-5：临时 key 下写入的配置密文重启后无法解密，在启动运行时、写库之前就拒绝。
+	if err := m.requirePersistentEncryptionKey(); err != nil {
+		return nil, err
+	}
 	installation, err := m.repo.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
@@ -856,6 +869,9 @@ func (m *PluginManager) CreateUIAssetToken(ctx context.Context, id int64, ttl ti
 	expires := time.Now().Add(ttl)
 	raw, err := json.Marshal(pluginUIAssetClaims{Version: 1, PluginID: id, Expires: expires.Unix()})
 	if err != nil {
+		return "", time.Time{}, err
+	}
+	if err := m.requirePersistentEncryptionKey(); err != nil {
 		return "", time.Time{}, err
 	}
 	// 加用途前缀，避免复用同一 AES-GCM 密钥的其他密文被当作 UI 能力令牌。
