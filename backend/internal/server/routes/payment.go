@@ -32,6 +32,7 @@ func RegisterPaymentRoutes(
 	jwtAuth middleware.JWTAuthMiddleware,
 	adminAuth middleware.AdminAuthMiddleware,
 	auditLog middleware.AuditLogMiddleware,
+	stepUpAuth middleware.StepUpAuthMiddleware,
 	settingService *service.SettingService,
 	panelRateLimiter *middleware.PanelRateLimiter,
 	redisClient *redis.Client,
@@ -98,9 +99,9 @@ func RegisterPaymentRoutes(
 		// Dashboard
 		adminGroup.GET("/dashboard", adminPaymentHandler.GetDashboard)
 
-		// Config
+		// Config（M-7/D2a：支付配置写入仅在实际变更时要求 step-up；服务商创建/删除始终要求）
 		adminGroup.GET("/config", adminPaymentHandler.GetConfig)
-		adminGroup.PUT("/config", adminPaymentHandler.UpdateConfig)
+		adminGroup.PUT("/config", adminPaymentHandler.UpdateConfig) // 仅实际变更时 step-up（handler 内）
 
 		// Orders
 		adminOrders := adminGroup.Group("/orders")
@@ -126,9 +127,9 @@ func RegisterPaymentRoutes(
 		providers := adminGroup.Group("/providers")
 		{
 			providers.GET("", adminPaymentHandler.ListProviders)
-			providers.POST("", adminPaymentHandler.CreateProvider)
-			providers.PUT("/:id", adminPaymentHandler.UpdateProvider)
-			providers.DELETE("/:id", adminPaymentHandler.DeleteProvider)
+			providers.POST("", gin.HandlerFunc(stepUpAuth), adminPaymentHandler.CreateProvider)
+			providers.PUT("/:id", adminPaymentHandler.UpdateProvider) // 仅实际变更时 step-up（handler 内）
+			providers.DELETE("/:id", gin.HandlerFunc(stepUpAuth), adminPaymentHandler.DeleteProvider)
 		}
 	}
 }

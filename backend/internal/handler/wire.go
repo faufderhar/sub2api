@@ -179,6 +179,13 @@ func ProvideAdminSettingHandler(settingService *service.SettingService, emailSer
 	return h
 }
 
+// ProvideAdminPaymentHandler creates admin.PaymentHandler with step-up deps (M-7).
+func ProvideAdminPaymentHandler(paymentService *service.PaymentService, paymentConfigService *service.PaymentConfigService, totpService *service.TotpService, userService *service.UserService) *admin.PaymentHandler {
+	h := admin.NewPaymentHandler(paymentService, paymentConfigService)
+	h.SetStepUpDeps(totpService, userService)
+	return h
+}
+
 // ProvideHandlers creates the Handlers struct
 func ProvideHandlers(
 	authHandler *AuthHandler,
@@ -290,7 +297,7 @@ var ProviderSet = wire.NewSet(
 	admin.NewChannelMonitorHandler,
 	admin.NewChannelMonitorRequestTemplateHandler,
 	admin.NewContentModerationHandler,
-	admin.NewPaymentHandler,
+	ProvideAdminPaymentHandler,
 	admin.NewAffiliateHandler,
 	admin.NewComplianceHandler,
 	admin.NewAuditLogHandler,

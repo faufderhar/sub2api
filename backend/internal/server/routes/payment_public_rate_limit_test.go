@@ -30,6 +30,7 @@ func newPaymentRoutesTestRouter(redisClient *redis.Client) *gin.Engine {
 		servermiddleware.JWTAuthMiddleware(noop),
 		servermiddleware.AdminAuthMiddleware(noop),
 		servermiddleware.AuditLogMiddleware(noop),
+		servermiddleware.StepUpAuthMiddleware(noop),
 		nil,
 		nil,
 		redisClient,

@@ -1,9 +1,11 @@
 package admin
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -168,3 +170,47 @@ func TestM7_PaymentConfigFieldsChangedComparators(t *testing.T) {
 }
 
 func strPtr(s string) *string { return &s }
+
+// PUT /api/v1/admin/payment/config：同样仅在实际变更时要求 step-up。
+func newAdminPaymentStepUpHandler(t *testing.T, granted bool) (*PaymentHandler, *settingHandlerRepoStub) {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	repo := &settingHandlerRepoStub{values: storedPaymentSettings()}
+	svc := service.NewSettingService(repo, &config.Config{})
+	h := NewPaymentHandler(nil, service.NewPaymentConfigService(nil, repo, nil))
+	userRepo := &paymentStepUpUserRepo{user: &service.User{ID: 1, Role: service.RoleAdmin, Status: service.StatusActive, TotpEnabled: true}}
+	h.SetStepUpDeps(service.NewTotpService(userRepo, nil, &paymentStepUpTotpCache{granted: granted}, svc, nil, nil), service.NewUserService(userRepo, repo, nil, nil))
+	return h, repo
+}
+
+func doAdminPaymentConfig(t *testing.T, h *PaymentHandler, body map[string]any) *httptest.ResponseRecorder {
+	t.Helper()
+	raw, err := json.Marshal(body)
+	require.NoError(t, err)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/payment/config", bytes.NewReader(raw))
+	c.Request.Header.Set("Content-Type", "application/json")
+	asJWTAdmin(c)
+	h.UpdateConfig(c)
+	return rec
+}
+
+func TestM7_AdminPaymentConfigUnchangedSkipsStepUp(t *testing.T) {
+	h, _ := newAdminPaymentStepUpHandler(t, false)
+	rec := doAdminPaymentConfig(t, h, map[string]any{"enabled": true, "min_amount": 5, "max_amount": 500})
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+}
+
+func TestM7_AdminPaymentConfigChangedRequiresStepUp(t *testing.T) {
+	h, repo := newAdminPaymentStepUpHandler(t, false)
+	rec := doAdminPaymentConfig(t, h, map[string]any{"min_amount": 50})
+	require.Equal(t, http.StatusForbidden, rec.Code, rec.Body.String())
+	require.Contains(t, rec.Body.String(), "STEP_UP_REQUIRED")
+	require.Equal(t, "5", repo.values[service.SettingMinRechargeAmount])
+
+	h, repo = newAdminPaymentStepUpHandler(t, true)
+	rec = doAdminPaymentConfig(t, h, map[string]any{"min_amount": 50})
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Equal(t, "50.00", repo.values[service.SettingMinRechargeAmount])
+}
