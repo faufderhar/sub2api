@@ -270,6 +270,33 @@ See `.env.example` for all available options.
 
 > **Note:** The `docker-deploy.sh` script automatically generates `JWT_SECRET`, `TOTP_ENCRYPTION_KEY`, and `POSTGRES_PASSWORD` for you.
 
+### Connection Pool Sizing / 连接池调参
+
+Built-in defaults target small and medium deployments (1–4 vCPU, PostgreSQL with
+the stock `max_connections=100`):
+
+| Setting | Env | Default | High-concurrency starting point |
+|---------|-----|---------|---------------------------------|
+| `database.max_open_conns` | `DATABASE_MAX_OPEN_CONNS` | `50` | `256` |
+| `database.max_idle_conns` | `DATABASE_MAX_IDLE_CONNS` | `10` | `128` (≈50% of max_open) |
+| `redis.pool_size` | `REDIS_POOL_SIZE` | `128` | `1024`–`4096` |
+| `redis.min_idle_conns` | `REDIS_MIN_IDLE_CONNS` | `10` | `128`–`256` |
+
+Earlier releases defaulted to DB 256/128 and Redis 1024/128. Deployments that set
+these values explicitly are unaffected; high-traffic deployments that relied on
+the old implicit defaults should set them back explicitly.
+
+Rules of thumb:
+- Keep `instances × DATABASE_MAX_OPEN_CONNS` at or below 50–80% of PostgreSQL
+  `max_connections` (`POSTGRES_MAX_CONNECTIONS`).
+- Raise the DB pool when request latency grows while PostgreSQL CPU is idle
+  (callers waiting for a pooled connection); raise the Redis pool when Redis pool
+  timeouts appear in logs under load.
+- Keep `REDIS_MAXCLIENTS` above `instances × REDIS_POOL_SIZE` plus headroom.
+
+中文要点：默认值已下调为 DB 50/10、Redis 128/10，适合中小规模；高并发部署请显式设置为上表右列的起点值，
+并保证 实例数 × DATABASE_MAX_OPEN_CONNS 不超过 PostgreSQL max_connections 的 50%~80%。
+
 ### Easy Migration (Local Directory Version)
 
 When using `docker-compose.local.yml`, all data is stored in local directories, making migration simple:
