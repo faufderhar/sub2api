@@ -234,6 +234,13 @@ export default {
       confirmPasswordPlaceholder: 'Confirm password',
       passwordMismatch: 'Passwords do not match'
     },
+    setupToken: {
+      label: 'Setup Token',
+      placeholder: '32-char hex token',
+      hint: 'Find it in the service startup log as: [setup] Setup token: <token>',
+      required: 'Setup token is required',
+      rateLimited: 'Too many attempts. Try again in {seconds}s'
+    },
     ready: {
       title: 'Ready to Install',
       description: 'Review your configuration and complete setup',
