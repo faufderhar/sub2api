@@ -31,6 +31,9 @@ type APIBodyGuardConfig struct {
 	LargeBodyReadTimeout time.Duration
 	// LargeBodyRoutes holds "METHOD /full/route/pattern" keys (gin FullPath) that may exceed MaxBodyBytes.
 	LargeBodyRoutes []string
+	// RouteBodyLimits gives specific routes ("METHOD /full/route/pattern") their own cap.
+	// They are streamed like LargeBodyRoutes (MaxBytesReader) and use LargeBodyReadTimeout (T-3).
+	RouteBodyLimits map[string]int64
 }
 
 // APILargeBodyRoutes lists the non-gateway endpoints that legitimately need bodies
@@ -77,10 +80,18 @@ func APIBodyGuard(cfg APIBodyGuardConfig) gin.HandlerFunc {
 			return
 		}
 
-		_, isLarge := large[req.Method+" "+c.FullPath()]
+		routeKey := req.Method + " " + c.FullPath()
+		_, isLarge := large[routeKey]
 		limit, timeout := cfg.MaxBodyBytes, cfg.ReadTimeout
 		if isLarge {
 			limit, timeout = cfg.LargeBodyMaxBytes, cfg.LargeBodyReadTimeout
+		}
+		if routeLimit, ok := cfg.RouteBodyLimits[routeKey]; ok && routeLimit > 0 {
+			isLarge = true
+			limit, timeout = routeLimit, cfg.LargeBodyReadTimeout
+			if cfg.LargeBodyMaxBytes > 0 && limit > cfg.LargeBodyMaxBytes {
+				limit = cfg.LargeBodyMaxBytes
+			}
 		}
 
 		if limit > 0 && req.ContentLength > limit {

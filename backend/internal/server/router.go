@@ -131,7 +131,7 @@ func registerRoutes(
 	routes.RegisterUserRoutes(v1, h, jwtAuth, auditLog, settingService, panelRateLimiter)
 	routes.RegisterModelPlazaRoutes(v1, h, optionalJWTAuth, settingService, panelRateLimiter)
 	routes.RegisterAdminRoutes(v1, h, adminAuth, auditLog, stepUpAuth, settingService, panelRateLimiter)
-	routes.RegisterMCPRoutes(v1, h, auditLog, stepUpAuth, settingService, panelRateLimiter, cfg.CORS.AllowedOrigins, redisClient)
+	routes.RegisterMCPRoutes(v1, h, auditLog, stepUpAuth, settingService, panelRateLimiter, cfg.CORS.AllowedOrigins, redisClient, mcpMaxRequestBodySize(cfg))
 	routes.RegisterMCPOAuthRoutes(r, v1, h, redisClient)
 	routes.RegisterGatewayRoutes(r, h, apiKeyAuth, apiKeyService, subscriptionService, opsService, settingService, compositeResolver, cfg)
 	routes.RegisterPaymentRoutes(v1, h.Payment, h.PaymentWebhook, h.Admin.Payment, jwtAuth, adminAuth, auditLog, stepUpAuth, settingService, panelRateLimiter, redisClient)
@@ -163,5 +163,17 @@ func newAPIBodyGuardConfig(cfg *config.Config) middleware2.APIBodyGuardConfig {
 		ReadTimeout:          time.Duration(readTimeout) * time.Second,
 		LargeBodyReadTimeout: time.Duration(largeTimeout) * time.Second,
 		LargeBodyRoutes:      middleware2.APILargeBodyRoutes,
+		// T-3：MCP 传输路由单独的请求体上限（默认 16MB），与其它 /api/v1 路由的 1MB 默认值解耦。
+		RouteBodyLimits: map[string]int64{
+			"POST /api/v1/mcp": mcpMaxRequestBodySize(cfg),
+		},
 	}
+}
+
+// mcpMaxRequestBodySize returns server.mcp_max_request_body_size or the 16MB default (D11a).
+func mcpMaxRequestBodySize(cfg *config.Config) int64 {
+	if cfg != nil && cfg.Server.MCPMaxRequestBodySize > 0 {
+		return cfg.Server.MCPMaxRequestBodySize
+	}
+	return config.DefaultMCPMaxRequestBodySize
 }

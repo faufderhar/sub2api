@@ -279,7 +279,7 @@ func newMCPOAuthHTTPFixture(t *testing.T, role string) *mcpOAuthHTTPFixture {
 	v1 := router.Group("/api/v1")
 	RegisterUserRoutes(v1, h, browserAuth, middleware.AuditLogMiddleware(mcpRouteNext), settings, nil)
 	RegisterMCPOAuthRoutes(router, v1, h, rdb)
-	RegisterMCPRoutes(v1, h, middleware.AuditLogMiddleware(mcpRouteNext), middleware.StepUpAuthMiddleware(mcpRouteNext), settings, nil, nil, rdb)
+	RegisterMCPRoutes(v1, h, middleware.AuditLogMiddleware(mcpRouteNext), middleware.StepUpAuthMiddleware(mcpRouteNext), settings, nil, nil, rdb, 0)
 	server.Start()
 	t.Cleanup(server.Close)
 	return &mcpOAuthHTTPFixture{server: server, router: router, resource: cfg.MCP.PublicURL, cfg: cfg, settings: settings, handlers: h, oauth: oauth, repo: repo, users: users}

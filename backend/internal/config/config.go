@@ -755,6 +755,7 @@ type ServerConfig struct {
 	APIMaxRequestBodySize    int64     `mapstructure:"api_max_request_body_size"`   // 非网关路由请求体上限（默认 1MB，白名单路由使用 MaxRequestBodySize）
 	APIReadTimeout           int       `mapstructure:"api_read_timeout"`            // 非网关路由请求体读取超时（秒），仅读取请求体期间生效
 	APILargeBodyReadTimeout  int       `mapstructure:"api_large_body_read_timeout"` // 大请求体白名单路由的请求体读取超时（秒）
+	MCPMaxRequestBodySize    int64     `mapstructure:"mcp_max_request_body_size"`   // T-3：MCP 传输路由（POST /api/v1/mcp）请求体上限（默认 16MB）
 	H2C                      H2CConfig `mapstructure:"h2c"`                         // HTTP/2 Cleartext 配置
 }
 
@@ -819,7 +820,8 @@ type LoginLockoutConfig struct {
 }
 
 const (
-	DefaultAPIMaxRequestBodySize          = 1 << 20 // 1MB
+	DefaultAPIMaxRequestBodySize          = 1 << 20  // 1MB
+	DefaultMCPMaxRequestBodySize          = 16 << 20 // 16MB（T-3/D11a）
 	DefaultAPIReadTimeoutSeconds          = 30
 	DefaultAPILargeBodyReadTimeoutSeconds = 600
 )
@@ -2149,6 +2151,7 @@ func setDefaults() {
 	viper.SetDefault("server.max_request_body_size", int64(256*1024*1024))
 	// M-1：非网关路由默认 1MB 请求体上限与请求体读取超时
 	viper.SetDefault("server.api_max_request_body_size", int64(DefaultAPIMaxRequestBodySize))
+	viper.SetDefault("server.mcp_max_request_body_size", int64(DefaultMCPMaxRequestBodySize))
 	viper.SetDefault("server.api_read_timeout", DefaultAPIReadTimeoutSeconds)
 	viper.SetDefault("server.api_large_body_read_timeout", DefaultAPILargeBodyReadTimeoutSeconds)
 	// H2C 默认配置
@@ -2870,6 +2873,12 @@ func (c *Config) Validate() error {
 	}
 	if c.Server.MaxRequestBodySize > 0 && c.Server.APIMaxRequestBodySize > c.Server.MaxRequestBodySize {
 		return fmt.Errorf("server.api_max_request_body_size must not exceed server.max_request_body_size")
+	}
+	if c.Server.MCPMaxRequestBodySize < 0 {
+		return fmt.Errorf("server.mcp_max_request_body_size must be non-negative (0 uses the 16MB default)")
+	}
+	if c.Server.MaxRequestBodySize > 0 && c.Server.MCPMaxRequestBodySize > c.Server.MaxRequestBodySize {
+		return fmt.Errorf("server.mcp_max_request_body_size must not exceed server.max_request_body_size")
 	}
 	if c.Server.APIReadTimeout < 1 || c.Server.APIReadTimeout > 3600 {
 		return fmt.Errorf("server.api_read_timeout must be between 1 and 3600 seconds")
