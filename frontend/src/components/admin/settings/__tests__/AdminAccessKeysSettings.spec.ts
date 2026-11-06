@@ -10,7 +10,7 @@ const mocks = vi.hoisted(() => ({ list: vi.fn(), create: vi.fn(), update: vi.fn(
 vi.mock('@/api/admin/adminAccessKeys', () => mocks)
 vi.mock('@/api/admin/groups', () => ({ getAllIncludingInactive: vi.fn().mockResolvedValue([{ id: 7, name: '测试分组' }]) }))
 vi.mock('@/components/auth/TotpStepUpDialog.vue', () => ({ default: { template: '<div />' } }))
-vi.mock('@/composables/useStepUp', () => ({ useStepUp: () => ({ run: mocks.stepUp }), isStepUpCancelled: () => false }))
+vi.mock('@/composables/useStepUp', () => ({ useStepUp: () => ({ run: mocks.stepUp }), isStepUpCancelled: () => false, isStepUpBlocked: () => false, stepUpBlockedMessage: (e: { message?: string }) => e?.message || 'blocked' }))
 beforeEach(() => {
   vi.clearAllMocks()
   vi.mocked(getAllIncludingInactive).mockResolvedValue([{ id: 7, name: '测试分组' }] as Awaited<ReturnType<typeof getAllIncludingInactive>>)

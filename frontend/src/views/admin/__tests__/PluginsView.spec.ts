@@ -52,6 +52,7 @@ vi.mock('@/composables/useStepUp', () => ({
   isStepUpBlocked: () => false,
   isStepUpCancelled: () => false,
   stepUpBlockReason: () => '',
+  stepUpBlockedMessage: (err: { message?: string }) => err?.message || 'step-up-blocked',
 }))
 
 vi.mock('vue-i18n', async (importOriginal) => ({

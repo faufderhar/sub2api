@@ -6677,6 +6677,14 @@
                 <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
                   {{ t("admin.settings.site.homeContentHint") }}
                 </p>
+                <!-- F-2：http / 非法 URL 不会在首页显示 -->
+                <p
+                  v-if="homeContentHttpWarning"
+                  data-testid="home-content-http-warning"
+                  class="mt-2 text-xs text-amber-600 dark:text-amber-400"
+                >
+                  {{ t("admin.settings.site.homeContentHttpWarning") }}
+                </p>
                 <!-- iframe CSP Warning -->
                 <p class="mt-2 text-xs text-amber-600 dark:text-amber-400">
                   {{ t("admin.settings.site.homeContentIframeWarning") }}
@@ -9006,12 +9014,13 @@ import {
   useStepUp,
   isStepUpCancelled,
   isStepUpBlocked,
-  stepUpBlockReason,
+  stepUpBlockedMessage,
 } from "@/composables/useStepUp";
 import AdminAccessKeysSettings from "@/components/admin/settings/AdminAccessKeysSettings.vue";
 import TotpStepUpDialog from "@/components/auth/TotpStepUpDialog.vue";
 import { affiliatesAPI, type AffiliateAdminEntry, type SimpleUser as AffiliateSimpleUser } from "@/api/admin/affiliates";
 import { extractApiErrorMessage, extractI18nErrorMessage } from "@/utils/apiError";
+import { shouldWarnHomeContentHttp } from "@/utils/homeContentHttpsWarning";
 import { useAppStore } from "@/stores";
 import { useAdminSettingsStore } from "@/stores/adminSettings";
 import { normalizeVisibleMethod } from "@/components/payment/paymentFlow";
@@ -9032,6 +9041,26 @@ const { t, locale } = useI18n();
 const appStore = useAppStore();
 // 关闭 step-up 开关是敏感操作：后端返回 STEP_UP_REQUIRED 时弹 TOTP 码重试
 const settingsStepUp = useStepUp();
+
+/** Payment provider CUD always requires step-up (BE always-on). */
+async function withPaymentProviderStepUp<T>(action: () => Promise<T>): Promise<T | undefined> {
+  try {
+    return await settingsStepUp.run(action);
+  } catch (error: unknown) {
+    if (isStepUpCancelled(error)) return undefined;
+    if (isStepUpBlocked(error)) {
+      appStore.showError(stepUpBlockedMessage(error, t));
+      return undefined;
+    }
+    appStore.showError(
+      extractI18nErrorMessage(error, t, "payment.errors", t("common.error")),
+    );
+    return undefined;
+  }
+}
+
+
+const homeContentHttpWarning = computed(() => shouldWarnHomeContentHttp(form.home_content));
 const adminSettingsStore = useAdminSettingsStore();
 const isZhLocale = computed(() => locale.value.startsWith("zh"));
 
@@ -11895,11 +11924,7 @@ async function saveSettings() {
       return;
     }
     if (isStepUpBlocked(error)) {
-      appStore.showError(
-        stepUpBlockReason(error) === "STEP_UP_ADMIN_API_KEY_FORBIDDEN"
-          ? t("stepUp.adminApiKeyForbidden")
-          : t("stepUp.notEnabled"),
-      );
+      appStore.showError(stepUpBlockedMessage(error, t));
       return;
     }
     // 开启 step-up 开关但本人未启用 2FA：给出可操作的专用提示
@@ -12001,6 +12026,10 @@ async function createAdminApiKey() {
     appStore.showSuccess(t("admin.settings.adminApiKey.keyGenerated"));
   } catch (error: unknown) {
     if (isStepUpCancelled(error)) return;
+    if (isStepUpBlocked(error)) {
+      appStore.showError(stepUpBlockedMessage(error, t));
+      return;
+    }
     appStore.showError(extractApiErrorMessage(error, t("common.error")));
   } finally {
     adminApiKeyOperating.value = false;
@@ -12023,6 +12052,10 @@ async function deleteAdminApiKey() {
     appStore.showSuccess(t("admin.settings.adminApiKey.keyDeleted"));
   } catch (error: unknown) {
     if (isStepUpCancelled(error)) return;
+    if (isStepUpBlocked(error)) {
+      appStore.showError(stepUpBlockedMessage(error, t));
+      return;
+    }
     appStore.showError(extractApiErrorMessage(error, t("common.error")));
   } finally {
     adminApiKeyOperating.value = false;
@@ -12555,11 +12588,13 @@ async function disableProvidersByType(type: string) {
     (p) => p.provider_key === type && p.enabled,
   );
   for (const p of matching) {
-    try {
-      await adminAPI.payment.updateProvider(p.id, { enabled: false });
+    const ok = await withPaymentProviderStepUp(() =>
+      adminAPI.payment.updateProvider(p.id, { enabled: false }),
+    );
+    if (ok !== undefined) {
       p.enabled = false;
-    } catch (err: unknown) {
-      slog("disable provider failed", p.id, err);
+    } else {
+      slog("disable provider failed or step-up blocked/cancelled", p.id);
     }
   }
 }
@@ -12764,11 +12799,14 @@ async function handleSaveProvider(payload: Partial<ProviderInstance>) {
       return;
     }
 
-    if (editingProvider.value) {
-      await adminAPI.payment.updateProvider(editingProvider.value.id, payload);
-    } else {
-      await adminAPI.payment.createProvider(payload);
-    }
+    const saved = editingProvider.value
+      ? await withPaymentProviderStepUp(() =>
+          adminAPI.payment.updateProvider(editingProvider.value!.id, payload),
+        )
+      : await withPaymentProviderStepUp(() =>
+          adminAPI.payment.createProvider(payload),
+        );
+    if (saved === undefined) return;
     showProviderDialog.value = false;
     // Reload full list (API returns decrypted/formatted data with correct sort order)
     await loadProviders();
@@ -12809,12 +12847,10 @@ async function handleToggleField(
   if (field === "refund_enabled" && !newValue) {
     payload.allow_user_refund = false;
   }
-  try {
-    await adminAPI.payment.updateProvider(provider.id, payload);
-    await loadProviders();
-  } catch (err: unknown) {
-    appStore.showError(extractI18nErrorMessage(err, t, "payment.errors", t("common.error")));
-  }
+  const updated = await withPaymentProviderStepUp(() =>
+    adminAPI.payment.updateProvider(provider.id, payload),
+  );
+  if (updated !== undefined) await loadProviders();
 }
 
 async function handleToggleType(provider: ProviderInstance, type: string) {
@@ -12835,14 +12871,12 @@ async function handleToggleType(provider: ProviderInstance, type: string) {
     showProviderEnablementConflict(conflict);
     return;
   }
-  try {
-    await adminAPI.payment.updateProvider(provider.id, {
+  const result = await withPaymentProviderStepUp(() =>
+    adminAPI.payment.updateProvider(provider.id, {
       supported_types: updated,
-    } as any);
-    await loadProviders();
-  } catch (err: unknown) {
-    appStore.showError(extractI18nErrorMessage(err, t, "payment.errors", t("common.error")));
-  }
+    } as any),
+  );
+  if (result !== undefined) await loadProviders();
 }
 
 function confirmDeleteProvider(provider: ProviderInstance) {
@@ -12853,7 +12887,7 @@ function confirmDeleteProvider(provider: ProviderInstance) {
 async function handleReorderProviders(
   updates: { id: number; sort_order: number }[],
 ) {
-  try {
+  const result = await withPaymentProviderStepUp(async () => {
     await Promise.all(
       updates.map((u) =>
         adminAPI.payment.updateProvider(u.id, {
@@ -12861,23 +12895,24 @@ async function handleReorderProviders(
         } as Partial<ProviderInstance>),
       ),
     );
+    return true;
+  });
+  if (result !== undefined) {
     await loadProviders();
-  } catch (err: unknown) {
-    appStore.showError(extractI18nErrorMessage(err, t, "payment.errors", t("common.error")));
+  } else {
     loadProviders();
   }
 }
 
 async function handleDeleteProvider() {
   if (!deletingProviderId.value) return;
-  try {
-    await adminAPI.payment.deleteProvider(deletingProviderId.value);
-    appStore.showSuccess(t("common.deleted"));
-    showDeleteProviderDialog.value = false;
-    loadProviders();
-  } catch (err: unknown) {
-    appStore.showError(extractI18nErrorMessage(err, t, "payment.errors", t("common.error")));
-  }
+  const deleted = await withPaymentProviderStepUp(() =>
+    adminAPI.payment.deleteProvider(deletingProviderId.value!),
+  );
+  if (deleted === undefined) return;
+  appStore.showSuccess(t("common.deleted"));
+  showDeleteProviderDialog.value = false;
+  loadProviders();
 }
 
 onMounted(() => {

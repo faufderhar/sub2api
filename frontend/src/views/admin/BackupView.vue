@@ -45,10 +45,10 @@
           </label>
         </div>
         <div class="mt-4 flex flex-wrap gap-2">
-          <button type="button" class="btn btn-secondary btn-sm" :disabled="testingS3" @click="testS3">
+          <button type="button" class="btn btn-secondary btn-sm" data-testid="backup-s3-test" :disabled="testingS3" @click="testS3">
             {{ testingS3 ? t('common.loading') : t('admin.backup.s3.testConnection') }}
           </button>
-          <button type="button" class="btn btn-primary btn-sm" :disabled="savingS3" @click="saveS3Config">
+          <button type="button" class="btn btn-primary btn-sm" data-testid="backup-s3-save" :disabled="savingS3" @click="saveS3Config">
             {{ savingS3 ? t('common.loading') : t('common.save') }}
           </button>
         </div>
@@ -120,10 +120,10 @@
         </div>
 
         <div class="mt-4 flex flex-wrap gap-2">
-          <button type="button" class="btn btn-secondary btn-sm" :disabled="testingImageStorage" @click="testImageStorage">
+          <button type="button" class="btn btn-secondary btn-sm" data-testid="backup-image-storage-test" :disabled="testingImageStorage" @click="testImageStorage">
             {{ testingImageStorage ? t('common.loading') : t('admin.backup.s3.testConnection') }}
           </button>
-          <button type="button" class="btn btn-primary btn-sm" :disabled="savingImageStorage" @click="saveImageStorageConfig">
+          <button type="button" class="btn btn-primary btn-sm" data-testid="backup-image-storage-save" :disabled="savingImageStorage" @click="saveImageStorageConfig">
             {{ savingImageStorage ? t('common.loading') : t('common.save') }}
           </button>
         </div>
@@ -191,7 +191,7 @@
               <label class="text-xs text-gray-600 dark:text-gray-400">{{ t('admin.backup.operations.expireDays') }}</label>
               <input v-model.number="manualExpireDays" type="number" min="0" class="input w-20 text-xs" />
             </div>
-            <button type="button" class="btn btn-primary btn-sm" :disabled="creatingBackup" @click="createBackup">
+            <button type="button" class="btn btn-primary btn-sm" data-testid="backup-create" :disabled="creatingBackup" @click="createBackup">
               {{ creatingBackup ? t('admin.backup.operations.backing') : t('admin.backup.operations.createBackup') }}
             </button>
             <button type="button" class="btn btn-secondary btn-sm" :disabled="loadingBackups" @click="loadBackups">
@@ -426,7 +426,7 @@ import type {
   BackupDownloadPart,
   ImageStorageConfig,
 } from '@/api/admin/backup'
-import { useStepUp, isStepUpBlocked, isStepUpCancelled, stepUpBlockReason } from '@/composables/useStepUp'
+import { useStepUp, isStepUpBlocked, isStepUpCancelled, stepUpBlockedMessage } from '@/composables/useStepUp'
 import TotpStepUpDialog from '@/components/auth/TotpStepUpDialog.vue'
 import BackupArchiveSettings from '@/components/admin/BackupArchiveSettings.vue'
 
@@ -437,11 +437,7 @@ const backupStepUp = useStepUp()
 // 敏感操作被 2FA 门控拦截时的统一提示。
 function reportStepUpBlocked(error: unknown): boolean {
   if (!isStepUpBlocked(error)) return false
-  appStore.showError(
-    stepUpBlockReason(error) === 'STEP_UP_ADMIN_API_KEY_FORBIDDEN'
-      ? t('stepUp.adminApiKeyForbidden')
-      : t('stepUp.notEnabled')
-  )
+  appStore.showError(stepUpBlockedMessage(error, t))
   return true
 }
 
@@ -682,6 +678,10 @@ async function saveS3Config() {
       savingS3.value = false
       return
     }
+    if (reportStepUpBlocked(error)) {
+      savingS3.value = false
+      return
+    }
     appStore.showError((error as { message?: string })?.message || t('errors.networkError'))
   } finally {
     savingS3.value = false
@@ -711,6 +711,10 @@ async function saveImageStorageConfig() {
     await loadImageStorageConfig()
   } catch (error) {
     if (isStepUpCancelled(error)) {
+      savingImageStorage.value = false
+      return
+    }
+    if (reportStepUpBlocked(error)) {
       savingImageStorage.value = false
       return
     }

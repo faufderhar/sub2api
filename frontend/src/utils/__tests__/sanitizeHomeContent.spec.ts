@@ -1,6 +1,6 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import DOMPurify from 'dompurify'
-import { sanitizeHomeContent, sanitizeSvg, isHttpsAbsoluteUrl } from '../sanitize'
+import { sanitizeHomeContent, sanitizeSvg, isHttpsAbsoluteUrl, resolveHomeIframeSandbox, HOME_IFRAME_SANDBOX_DEFAULT } from '../sanitize'
 
 describe('sanitizeHomeContent (L-1)', () => {
   it('去掉 <script>、on* 事件属性和 javascript: 链接', () => {
@@ -164,6 +164,115 @@ describe('sanitizeHomeContent (L-1)', () => {
       sanitizeHomeContent('<iframe src="http://example.com"></iframe>')
       expect(DOMPurify.sanitize('<iframe src="http://example.com"></iframe>', { ADD_TAGS: ['iframe'] }))
         .toContain('<iframe src="http://example.com">')
+    })
+  })
+
+
+  describe('F-1：首页 iframe 统一 sandbox（默认 + 交集不放宽）', () => {
+    const DEFAULT = HOME_IFRAME_SANDBOX_DEFAULT.join(' ')
+
+    it('未写 sandbox 时写入默认全集', () => {
+      const out = sanitizeHomeContent('<iframe src="https://example.com/embed"></iframe>')
+      const iframe = new DOMParser().parseFromString(out, 'text/html').querySelector('iframe')!
+      expect(iframe.getAttribute('sandbox')).toBe(DEFAULT)
+    })
+
+    it('管理员写更严的 sandbox 被保留（取交集）', () => {
+      const out = sanitizeHomeContent(
+        '<iframe src="https://example.com/embed" sandbox="allow-scripts allow-popups"></iframe>'
+      )
+      const iframe = new DOMParser().parseFromString(out, 'text/html').querySelector('iframe')!
+      expect(iframe.getAttribute('sandbox')).toBe('allow-scripts allow-popups')
+    })
+
+    it('管理员写空 sandbox（最严）仍为空，不放宽成默认', () => {
+      const out = sanitizeHomeContent('<iframe src="https://example.com/embed" sandbox=""></iframe>')
+      const iframe = new DOMParser().parseFromString(out, 'text/html').querySelector('iframe')!
+      expect(iframe.getAttribute('sandbox')).toBe('')
+    })
+
+    it('管理员写超出默认集合的 token（如 allow-top-navigation）被去掉', () => {
+      const out = sanitizeHomeContent(
+        '<iframe src="https://example.com/embed" sandbox="allow-scripts allow-top-navigation allow-popups allow-modals"></iframe>'
+      )
+      const iframe = new DOMParser().parseFromString(out, 'text/html').querySelector('iframe')!
+      expect(iframe.getAttribute('sandbox')).toBe('allow-scripts allow-popups')
+      expect(iframe.getAttribute('sandbox')).not.toContain('allow-top-navigation')
+      expect(iframe.getAttribute('sandbox')).not.toContain('allow-modals')
+    })
+
+    it('resolveHomeIframeSandbox 单元行为', () => {
+      expect(resolveHomeIframeSandbox(null)).toBe(DEFAULT)
+      expect(resolveHomeIframeSandbox(undefined)).toBe(DEFAULT)
+      expect(resolveHomeIframeSandbox('')).toBe('')
+      expect(resolveHomeIframeSandbox('allow-scripts allow-forms')).toBe('allow-scripts allow-forms')
+      expect(resolveHomeIframeSandbox('ALLOW-SCRIPTS allow-modals')).toBe('allow-scripts')
+    })
+  })
+
+
+  describe('A-1：同源 iframe 去掉 allow-same-origin', () => {
+    const NO_SAME = HOME_IFRAME_SANDBOX_DEFAULT.filter((t) => t !== 'allow-same-origin').join(' ')
+    const pageOrigin = 'https://app.test'
+    const pageHref = 'https://app.test/admin/settings'
+
+    beforeEach(() => {
+      vi.stubGlobal('location', {
+        href: pageHref,
+        origin: pageOrigin,
+        protocol: 'https:',
+        host: 'app.test',
+        hostname: 'app.test',
+        port: '',
+        pathname: '/admin/settings',
+        search: '',
+        hash: ''
+      })
+    })
+
+    afterEach(() => {
+      vi.unstubAllGlobals()
+    })
+
+    it('相对路径在 resolve 层视为同源（富文本仍只保留 https，相对 iframe 会被清洗掉）', () => {
+      expect(resolveHomeIframeSandbox(null, '/home-embed')).toBe(NO_SAME)
+      // 富文本 L-1：非 https 绝对地址的 iframe 整段移除
+      expect(sanitizeHomeContent('<iframe src="/home-embed"></iframe>')).not.toContain('<iframe')
+    })
+
+    it('与页面同源的 https iframe 去掉 allow-same-origin', () => {
+      const same = `${pageOrigin}/embed`
+      const out = sanitizeHomeContent(`<iframe src="${same}"></iframe>`)
+      const iframe = new DOMParser().parseFromString(out, 'text/html').querySelector('iframe')!
+      expect(iframe.getAttribute('sandbox')).toBe(NO_SAME)
+      expect(iframe.getAttribute('sandbox')).not.toContain('allow-same-origin')
+    })
+
+    it('跨域 https 仍保留默认 allow-same-origin', () => {
+      const out = sanitizeHomeContent('<iframe src="https://example.com/embed"></iframe>')
+      const iframe = new DOMParser().parseFromString(out, 'text/html').querySelector('iframe')!
+      expect(iframe.getAttribute('sandbox')).toContain('allow-same-origin')
+    })
+
+    it('管理员自写 sandbox 含 allow-same-origin 时同源仍被去掉', () => {
+      const same = `${pageOrigin}/local`
+      const out = sanitizeHomeContent(
+        `<iframe src="${same}" sandbox="allow-scripts allow-same-origin allow-forms"></iframe>`
+      )
+      const iframe = new DOMParser().parseFromString(out, 'text/html').querySelector('iframe')!
+      expect(iframe.getAttribute('sandbox')).toBe('allow-scripts allow-forms')
+      expect(iframe.getAttribute('sandbox')).not.toContain('allow-same-origin')
+    })
+
+    it('resolveHomeIframeSandbox 对同源 src 去掉 allow-same-origin', () => {
+      expect(resolveHomeIframeSandbox(null, '/x')).toBe(NO_SAME)
+      expect(resolveHomeIframeSandbox(null, `${pageOrigin}/x`)).toBe(NO_SAME)
+      expect(resolveHomeIframeSandbox(null, 'https://example.com/x')).toBe(
+        HOME_IFRAME_SANDBOX_DEFAULT.join(' ')
+      )
+      expect(
+        resolveHomeIframeSandbox('allow-scripts allow-same-origin', '/x')
+      ).toBe('allow-scripts')
     })
   })
 

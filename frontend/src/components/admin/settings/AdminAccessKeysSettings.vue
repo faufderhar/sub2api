@@ -96,7 +96,7 @@ import { CONCRETE_PLATFORM_OPTIONS } from '@/constants/platforms'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import TotpStepUpDialog from '@/components/auth/TotpStepUpDialog.vue'
 import { useAdminAccessKeyPermissions } from '@/composables/useAdminAccessKeyPermissions'
-import { isStepUpCancelled, useStepUp } from '@/composables/useStepUp'
+import { isStepUpBlocked, isStepUpCancelled, stepUpBlockedMessage, useStepUp } from '@/composables/useStepUp'
 
 const { t, locale } = useI18n()
 const { permissionLabel, permissionCategory } = useAdminAccessKeyPermissions()
@@ -154,7 +154,11 @@ function ruleSummary(rule: AccessRule): string {
   return t('adminAccessKeys.ruleSummary', { groups: groupLabel, types, platforms, count: rule.permissions.length })
 }
 function emptyRule(): AccessRule { return { permissions: [], group_ids: [], all_groups: false, include_ungrouped: false, account_types: [], platforms: [] } }
-function report(e: unknown) { if (!isStepUpCancelled(e)) error.value = (e as { message?: string })?.message || t('adminAccessKeys.operationFailed') }
+function report(e: unknown) {
+  if (isStepUpCancelled(e)) return
+  if (isStepUpBlocked(e)) { error.value = stepUpBlockedMessage(e, t); return }
+  error.value = (e as { message?: string })?.message || t('adminAccessKeys.operationFailed')
+}
 async function load() {
   loading.value = true
   error.value = ''

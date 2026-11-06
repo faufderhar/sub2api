@@ -961,6 +961,7 @@
       </template>
     </BaseDialog>
   </AppLayout>
+  <TotpStepUpDialog :controller="proxyExportStepUp" />
 </template>
 
 <script setup lang="ts">
@@ -976,6 +977,8 @@ import DataTable from '@/components/common/DataTable.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
+import TotpStepUpDialog from '@/components/auth/TotpStepUpDialog.vue'
+import { useStepUp, isStepUpBlocked, isStepUpCancelled, stepUpBlockedMessage } from '@/composables/useStepUp'
 import EmptyState from '@/components/common/EmptyState.vue'
 import ImportDataModal from '@/components/admin/proxy/ImportDataModal.vue'
 import Select from '@/components/common/Select.vue'
@@ -1919,19 +1922,24 @@ const formatExportTimestamp = () => {
   return `${now.getFullYear()}${pad2(now.getMonth() + 1)}${pad2(now.getDate())}${pad2(now.getHours())}${pad2(now.getMinutes())}${pad2(now.getSeconds())}`
 }
 
+const proxyExportStepUp = useStepUp()
+
 const handleExportData = async () => {
   if (exportingData.value) return
   exportingData.value = true
   try {
-    const dataPayload = await adminAPI.proxies.exportData(
-      selectedCount.value > 0
-        ? { ids: Array.from(selectedProxyIds.value) }
-        : {
-            filters: buildProxyQueryFilters()
-          }
+    const dataPayload = await proxyExportStepUp.run(() =>
+      adminAPI.proxies.exportData(
+        selectedCount.value > 0
+          ? { ids: Array.from(selectedProxyIds.value) }
+          : {
+              filters: buildProxyQueryFilters()
+            }
+      )
     )
     const timestamp = formatExportTimestamp()
     const filename = `sub2api-proxy-${timestamp}.json`
+    // 当前后端返回 JSON 对象（非 blob）；若将来改为 blob 响应，需从错误体解析 JSON reason。
     const blob = new Blob([JSON.stringify(dataPayload, null, 2)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
@@ -1941,7 +1949,13 @@ const handleExportData = async () => {
     URL.revokeObjectURL(url)
     appStore.showSuccess(t('admin.proxies.dataExported'))
   } catch (error: any) {
-    appStore.showError(error?.message || t('admin.proxies.dataExportFailed'))
+    if (isStepUpCancelled(error)) {
+      // 用户主动取消 step-up 验证，静默返回
+    } else if (isStepUpBlocked(error)) {
+      appStore.showError(stepUpBlockedMessage(error, t))
+    } else {
+      appStore.showError(error?.message || t('admin.proxies.dataExportFailed'))
+    }
   } finally {
     exportingData.value = false
     showExportDataDialog.value = false

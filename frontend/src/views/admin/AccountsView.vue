@@ -500,7 +500,7 @@ import { CONCRETE_PLATFORM_OPTIONS } from '@/constants/platforms'
 import { useTableLoader } from '@/composables/useTableLoader'
 import { useSwipeSelect, type SwipeSelectVirtualContext } from '@/composables/useSwipeSelect'
 import { useTableSelection } from '@/composables/useTableSelection'
-import { useStepUp, isStepUpBlocked, isStepUpCancelled, stepUpBlockReason } from '@/composables/useStepUp'
+import { useStepUp, isStepUpBlocked, isStepUpCancelled, stepUpBlockedMessage } from '@/composables/useStepUp'
 import TotpStepUpDialog from '@/components/auth/TotpStepUpDialog.vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
@@ -2342,11 +2342,7 @@ const handleExportData = async () => {
     if (isStepUpCancelled(error)) {
       // 用户主动取消 step-up 验证，静默返回，不弹错误提示。
     } else if (isStepUpBlocked(error)) {
-      appStore.showError(
-        stepUpBlockReason(error) === 'STEP_UP_ADMIN_API_KEY_FORBIDDEN'
-          ? t('stepUp.adminApiKeyForbidden')
-          : t('stepUp.notEnabled')
-      )
+      appStore.showError(stepUpBlockedMessage(error, t))
     } else {
       appStore.showError(error?.message || t('admin.accounts.dataExportFailed'))
     }

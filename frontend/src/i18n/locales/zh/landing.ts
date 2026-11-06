@@ -234,6 +234,15 @@ export default {
       confirmPasswordPlaceholder: '确认密码',
       passwordMismatch: '密码不匹配'
     },
+    setupToken: {
+      label: 'Setup Token',
+      placeholder: '32 位十六进制 token',
+      hint: '在服务启动日志中查看，格式：[setup] Setup token: <token>',
+      required: '请填写 setup token',
+      invalid: 'setup token 不正确，请在服务启动日志中查看最新 token',
+      rateLimited: '尝试过多，请 {seconds} 秒后再试',
+      rateLimitedNoWait: '尝试过多，请稍后再试'
+    },
     ready: {
       title: '准备安装',
       description: '检查您的配置并完成安装',

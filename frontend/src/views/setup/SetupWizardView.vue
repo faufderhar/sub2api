@@ -57,6 +57,31 @@
         </div>
       </div>
 
+
+      <!-- Setup token (L-8 / F-5): shown when GET /setup/status reports setup_token_required -->
+      <div
+        v-if="setupTokenRequired"
+        class="mb-6 rounded-2xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-800/60 dark:bg-amber-950/30"
+        data-testid="setup-token-panel"
+      >
+        <label class="input-label" for="setup-token-input">{{ t('setup.setupToken.label') }}</label>
+        <input
+          id="setup-token-input"
+          v-model="setupTokenInput"
+          type="text"
+          autocomplete="off"
+          spellcheck="false"
+          class="input font-mono tracking-wide"
+          :placeholder="t('setup.setupToken.placeholder')"
+          data-testid="setup-token-input"
+          @change="syncSetupToken"
+          @blur="syncSetupToken"
+        />
+        <p class="mt-2 text-xs text-amber-800 dark:text-amber-200">
+          {{ t('setup.setupToken.hint') }}
+        </p>
+      </div>
+
       <!-- Step Content -->
       <div class="rounded-2xl bg-white p-8 shadow-xl dark:bg-dark-800">
         <!-- Step 1: Database -->
@@ -89,18 +114,6 @@
                 placeholder="5432"
               />
             </div>
-          </div>
-
-          <div class="flex items-center justify-between rounded-xl border border-gray-200 p-3 dark:border-dark-700">
-            <div>
-              <p class="text-sm font-medium text-gray-900 dark:text-white">
-                {{ t("setup.redis.enableTls") }}
-              </p>
-              <p class="text-xs text-gray-500 dark:text-dark-400">
-                {{ t("setup.redis.enableTlsHint") }}
-              </p>
-            </div>
-            <Toggle v-model="formData.redis.enable_tls" />
           </div>
 
           <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -499,9 +512,18 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed } from 'vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { testDatabase, testRedis, install, type InstallRequest } from '@/api/setup'
+import {
+  testDatabase,
+  testRedis,
+  install,
+  getSetupStatus,
+  setSetupToken,
+  normalizeSetupError,
+  setupTokenUserMessage,
+  type InstallRequest
+} from '@/api/setup'
 import { buildGatewayUrl } from '@/api/client'
 import Select from '@/components/common/Select.vue'
 import Toggle from '@/components/common/Toggle.vue'
@@ -519,6 +541,37 @@ const steps = computed(() => [
 const currentStep = ref(0)
 const errorMessage = ref('')
 const installSuccess = ref(false)
+const setupTokenRequired = ref(false)
+const setupTokenInput = ref('')
+
+function syncSetupToken() {
+  setSetupToken(setupTokenInput.value)
+}
+
+function formatSetupError(error: unknown): string {
+  const n = normalizeSetupError(error)
+  const localized = setupTokenUserMessage(n, t)
+  if (localized) return localized
+  return n.message || 'Request failed'
+}
+
+async function loadSetupStatus() {
+  try {
+    const status = await getSetupStatus()
+    setupTokenRequired.value = !!status.setup_token_required
+  } catch {
+    // If status fails, still allow typing a token; backend will reject without it.
+    setupTokenRequired.value = true
+  }
+}
+
+onMounted(() => {
+  void loadSetupStatus()
+})
+
+watch(setupTokenInput, () => {
+  syncSetupToken()
+})
 
 // Connection test states
 const testingDb = ref(false)
@@ -588,14 +641,18 @@ async function testDatabaseConnection() {
   testingDb.value = true
   errorMessage.value = ''
   dbConnected.value = false
+  syncSetupToken()
+  if (setupTokenRequired.value && !setupTokenInput.value.trim()) {
+    errorMessage.value = t('setup.setupToken.required')
+    testingDb.value = false
+    return
+  }
 
   try {
     await testDatabase(formData.database)
     dbConnected.value = true
   } catch (error: unknown) {
-    const err = error as { response?: { data?: { detail?: string; message?: string } }; message?: string }
-    errorMessage.value =
-      err.response?.data?.detail || err.response?.data?.message || err.message || 'Connection failed'
+    errorMessage.value = formatSetupError(error)
   } finally {
     testingDb.value = false
   }
@@ -605,14 +662,18 @@ async function testRedisConnection() {
   testingRedis.value = true
   errorMessage.value = ''
   redisConnected.value = false
+  syncSetupToken()
+  if (setupTokenRequired.value && !setupTokenInput.value.trim()) {
+    errorMessage.value = t('setup.setupToken.required')
+    testingRedis.value = false
+    return
+  }
 
   try {
     await testRedis(formData.redis)
     redisConnected.value = true
   } catch (error: unknown) {
-    const err = error as { response?: { data?: { detail?: string; message?: string } }; message?: string }
-    errorMessage.value =
-      err.response?.data?.detail || err.response?.data?.message || err.message || 'Connection failed'
+    errorMessage.value = formatSetupError(error)
   } finally {
     testingRedis.value = false
   }
@@ -628,6 +689,12 @@ function nextStep() {
 async function performInstall() {
   installing.value = true
   errorMessage.value = ''
+  syncSetupToken()
+  if (setupTokenRequired.value && !setupTokenInput.value.trim()) {
+    errorMessage.value = t('setup.setupToken.required')
+    installing.value = false
+    return
+  }
 
   try {
     await install(formData)
@@ -635,9 +702,7 @@ async function performInstall() {
     // Start polling for service restart
     waitForServiceRestart()
   } catch (error: unknown) {
-    const err = error as { response?: { data?: { detail?: string; message?: string } }; message?: string }
-    errorMessage.value =
-      err.response?.data?.detail || err.response?.data?.message || err.message || 'Installation failed'
+    errorMessage.value = formatSetupError(error)
   } finally {
     installing.value = false
   }

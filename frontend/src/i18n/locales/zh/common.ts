@@ -453,7 +453,11 @@ export default {
     hint: '请输入身份验证器应用中的 6 位验证码以继续此敏感操作。',
     verifyFailed: '验证失败，请重试',
     notEnabled: '此操作需要开启二次验证，请先在个人资料中启用 TOTP。',
-    adminApiKeyForbidden: '管理 API Key 无法执行此操作，请使用已通过二次验证的管理员会话。'
+    adminApiKeyForbidden: '管理 API Key 无法执行此操作，请使用已通过二次验证的管理员会话。',
+    mcpOauthForbidden: 'MCP OAuth 凭证无法执行此操作，请使用已通过二次验证的管理员会话。',
+    machineCredentialForbidden: '机器凭证无法执行此操作，请使用已通过二次验证的管理员会话。',
+    unavailable: '二次验证服务暂不可用，请稍后重试。',
+    blocked: '此操作需要二次验证，当前无法完成。'
   },
 
   // Dashboard
