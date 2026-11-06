@@ -41,7 +41,7 @@ func TestM3_CheckDialAddress(t *testing.T) {
 func TestM3_DialControlRejectsResolvedLoopback(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 	_, port, _ := net.SplitHostPort(ln.Addr().String())
 
 	d := &net.Dialer{Timeout: 2 * time.Second, Control: DialControl}
@@ -58,7 +58,7 @@ func TestM3_DialControlRejectsResolvedLoopback(t *testing.T) {
 func TestM3_DialControlContextEnforceToggle(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 
 	type key struct{}
 	d := &net.Dialer{Timeout: 2 * time.Second, ControlContext: DialControlContext(func(ctx context.Context) bool {
