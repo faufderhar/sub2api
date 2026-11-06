@@ -29,6 +29,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/geminicli"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
@@ -610,7 +611,7 @@ func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := httputil.ReadResponseBody(resp.Body, httputil.DefaultResponseBodyMaxBytes)
 		errMsg := fmt.Sprintf("API returned %d: %s", resp.StatusCode, string(body))
 
 		// 403 表示账号被上游封禁，标记为 error 状态
@@ -682,7 +683,7 @@ func (s *AccountTestService) testClaudeVertexServiceAccountConnection(c *gin.Con
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := httputil.ReadResponseBody(resp.Body, httputil.DefaultResponseBodyMaxBytes)
 		errMsg := fmt.Sprintf("API returned %d: %s", resp.StatusCode, string(body))
 		if resp.StatusCode == http.StatusForbidden {
 			_ = s.accountRepo.SetError(ctx, account.ID, errMsg)
@@ -767,7 +768,7 @@ func (s *AccountTestService) testBedrockAccountConnection(c *gin.Context, ctx co
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	body, _ := io.ReadAll(resp.Body)
+	body, _ := httputil.ReadResponseBody(resp.Body, httputil.DefaultResponseBodyMaxBytes)
 
 	if resp.StatusCode != http.StatusOK {
 		return s.sendErrorAndEnd(c, fmt.Sprintf("API returned %d: %s", resp.StatusCode, string(body)))
@@ -965,7 +966,7 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := httputil.ReadResponseBody(resp.Body, httputil.DefaultResponseBodyMaxBytes)
 		body = redactAgentIdentitySensitiveBodyForAccount(ctx, s.accountRepo, credentialAccount, body)
 		if !agentIdentityTaskRecoveryWasTried(ctx) && credentialAccount.IsOpenAIAgentIdentity() && isAgentIdentityTaskInvalidHTTPResponse(resp.StatusCode, body) {
 			expectedTaskID := credentialAccount.GetCredential("task_id")
@@ -1164,7 +1165,7 @@ func (s *AccountTestService) observeGrokTestResponse(ctx context.Context, accoun
 	// for the user-facing test result.
 	var responseBody []byte
 	if resp.StatusCode >= http.StatusBadRequest && resp.Body != nil {
-		responseBody, _ = io.ReadAll(resp.Body)
+		responseBody, _ = httputil.ReadResponseBody(resp.Body, httputil.DefaultResponseBodyMaxBytes)
 		_ = resp.Body.Close()
 		resp.Body = io.NopCloser(bytes.NewReader(responseBody))
 	}
@@ -1277,7 +1278,7 @@ func (s *AccountTestService) testGrokResponsesConnection(c *gin.Context, ctx con
 	s.observeGrokTestResponse(withGrokTeamRateLimitModel(ctx, testModelID), account, resp)
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := httputil.ReadResponseBody(resp.Body, httputil.DefaultResponseBodyMaxBytes)
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Grok Responses API returned %d: %s", resp.StatusCode, string(body)))
 	}
 
@@ -1367,7 +1368,7 @@ func (s *AccountTestService) testGrokImageGeneration(c *gin.Context, ctx context
 	defer func() { _ = resp.Body.Close() }()
 	s.observeGrokTestResponse(ctx, account, resp)
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := httputil.ReadResponseBody(resp.Body, httputil.DefaultResponseBodyMaxBytes)
 	if err != nil {
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to read Grok image response: %s", err.Error()))
 	}
@@ -1454,7 +1455,7 @@ func (s *AccountTestService) testGrokVideoGeneration(c *gin.Context, ctx context
 	defer func() { _ = resp.Body.Close() }()
 	s.observeGrokTestResponse(ctx, account, resp)
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := httputil.ReadResponseBody(resp.Body, httputil.DefaultResponseBodyMaxBytes)
 	if err != nil {
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to read Grok video response: %s", err.Error()))
 	}
@@ -1492,7 +1493,7 @@ func (s *AccountTestService) testGrokVideoGeneration(c *gin.Context, ctx context
 		if err != nil {
 			return s.sendErrorAndEnd(c, fmt.Sprintf("Grok video status failed: %s", err.Error()))
 		}
-		statusBody, _ := io.ReadAll(statusResp.Body)
+		statusBody, _ := httputil.ReadResponseBody(statusResp.Body, httputil.DefaultResponseBodyMaxBytes)
 		_ = statusResp.Body.Close()
 		if statusResp.StatusCode != http.StatusOK && statusResp.StatusCode != http.StatusAccepted {
 			return s.sendErrorAndEnd(c, fmt.Sprintf("Grok video status returned %d: %s", statusResp.StatusCode, string(statusBody)))
@@ -1624,7 +1625,7 @@ User query:
 	defer func() { _ = resp.Body.Close() }()
 	s.observeGrokTestResponse(withGrokTeamRateLimitModel(ctx, grokDefaultResponsesModel), account, resp)
 
-	body, _ := io.ReadAll(resp.Body)
+	body, _ := httputil.ReadResponseBody(resp.Body, httputil.DefaultResponseBodyMaxBytes)
 	if resp.StatusCode != http.StatusOK {
 		return s.sendErrorAndEnd(c, fmt.Sprintf("standalone web_search probe returned %d: %s", resp.StatusCode, string(body)))
 	}
@@ -1702,7 +1703,7 @@ func (s *AccountTestService) testGrokTTS(c *gin.Context, ctx context.Context, ac
 		if err != nil {
 			return s.sendErrorAndEnd(c, fmt.Sprintf("Grok TTS failed: %s", err.Error()))
 		}
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := httputil.ReadResponseBody(resp.Body, httputil.DefaultResponseBodyMaxBytes)
 		_ = resp.Body.Close()
 		s.observeGrokTestResponse(ctx, account, resp)
 		lastCode = resp.StatusCode
@@ -1795,7 +1796,7 @@ func (s *AccountTestService) testGrokSTT(c *gin.Context, ctx context.Context, ac
 	}
 	defer func() { _ = resp.Body.Close() }()
 	s.observeGrokTestResponse(ctx, account, resp)
-	respBody, _ := io.ReadAll(resp.Body)
+	respBody, _ := httputil.ReadResponseBody(resp.Body, httputil.DefaultResponseBodyMaxBytes)
 	if resp.StatusCode != http.StatusOK {
 		// 4xx on synthetic audio still proves the STT endpoint is wired; report clearly.
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Grok STT returned %d: %s", resp.StatusCode, string(respBody)))
@@ -2166,7 +2167,7 @@ func (s *AccountTestService) testOpenAIChatCompletionsConnection(
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := httputil.ReadResponseBody(resp.Body, httputil.DefaultResponseBodyMaxBytes)
 		if resp.StatusCode == http.StatusTooManyRequests {
 			s.reconcileOpenAI429State(ctx, account, resp.Header, body)
 		}
@@ -2455,7 +2456,7 @@ func (s *AccountTestService) testGeminiAccountConnection(c *gin.Context, account
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := httputil.ReadResponseBody(resp.Body, httputil.DefaultResponseBodyMaxBytes)
 		return s.sendErrorAndEnd(c, fmt.Sprintf("API returned %d: %s", resp.StatusCode, string(body)))
 	}
 
@@ -3084,7 +3085,7 @@ func (s *AccountTestService) testOpenAIImageAPIKey(c *gin.Context, ctx context.C
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := httputil.ReadResponseBody(resp.Body, httputil.DefaultResponseBodyMaxBytes)
 	if err != nil {
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to read response: %s", err.Error()))
 	}
@@ -3232,7 +3233,7 @@ func (s *AccountTestService) testOpenAIImageOAuth(c *gin.Context, ctx context.Co
 		return s.sendErrorAndEnd(c, message)
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := httputil.ReadResponseBody(resp.Body, httputil.DefaultResponseBodyMaxBytes)
 	if err != nil {
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to read image response: %s", err.Error()))
 	}

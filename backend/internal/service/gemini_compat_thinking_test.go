@@ -100,7 +100,6 @@ func geminiCompatThinkingTestAccount() *Account {
 }
 
 func TestGeminiForwardAsChatCompletions_StreamsThoughtsAsReasoningContent(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	upstreamBody := `data: {"candidates":[{"content":{"role":"model","parts":[{"text":"Weighing options","thought":true}]}}]}` + "\n\n" +
 		`data: {"candidates":[{"content":{"role":"model","parts":[{"text":" carefully.","thought":true}]}}]}` + "\n\n" +
 		`data: {"candidates":[{"content":{"role":"model","parts":[{"text":"Final answer","thoughtSignature":"sig"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":4,"candidatesTokenCount":2,"thoughtsTokenCount":7}}` + "\n\n"
@@ -147,7 +146,6 @@ func TestGeminiForwardAsChatCompletions_StreamsThoughtsAsReasoningContent(t *tes
 }
 
 func TestGeminiForwardAsChatCompletions_NonStreamForwardsEffortWithoutThoughts(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	upstream := &queuedHTTPUpstreamStub{responses: []*http.Response{{
 		StatusCode: http.StatusOK,
 		Header:     http.Header{"Content-Type": []string{"application/json"}},
@@ -169,7 +167,6 @@ func TestGeminiForwardAsChatCompletions_NonStreamForwardsEffortWithoutThoughts(t
 }
 
 func TestGeminiMessagesForward_IncludeThoughtsFollowsClientThinking(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	tests := []struct {
 		name         string
 		body         string
@@ -210,7 +207,6 @@ func TestGeminiMessagesForward_IncludeThoughtsFollowsClientThinking(t *testing.T
 }
 
 func TestGeminiMessagesHandleStreamingResponse_EmitsThinkingBlockBeforeText(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	upstreamBody := `data: {"candidates":[{"content":{"parts":[{"text":"Plan the reply","thought":true}]}}]}` + "\n\n" +
 		`data: {"candidates":[{"content":{"parts":[{"text":"Hello"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":5,"candidatesTokenCount":1,"thoughtsTokenCount":4}}` + "\n\n"
 	resp := &http.Response{
@@ -275,7 +271,6 @@ func TestConvertClaudeMessagesToGemini_DropsHistoryThinkingBlocks(t *testing.T) 
 }
 
 func TestGeminiForwardAsChatCompletions_DropsHistoryReasoningContent(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	upstream := &queuedHTTPUpstreamStub{responses: []*http.Response{{
 		StatusCode: http.StatusOK,
 		Header:     http.Header{"Content-Type": []string{"application/json"}},
@@ -307,7 +302,6 @@ func TestGeminiForwardAsChatCompletions_DropsHistoryReasoningContent(t *testing.
 }
 
 func TestGeminiMessagesForward_SignatureRetryKeepsClientThinkingParams(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	okBody := "data: " + `{"candidates":[{"content":{"parts":[{"text":"ok"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":3,"candidatesTokenCount":1}}` + "\n\n"
 	upstream := &queuedHTTPUpstreamStub{responses: []*http.Response{
 		{

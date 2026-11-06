@@ -145,7 +145,6 @@ func TestVertexServiceAccountNotFoundError_OnlyMatchesAccountNotFound(t *testing
 }
 
 func TestGeminiForwardNative_VertexServiceAccountNotFoundDisablesAndFailsOver(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	useVertexTokenEndpoint(t, http.StatusBadRequest, vertexAccountNotFoundTokenBody)
 	svc, httpStub, repo := newVertexTokenErrorService()
 	c, _ := newGeminiNativeTestContext(t)
@@ -158,7 +157,6 @@ func TestGeminiForwardNative_VertexServiceAccountNotFoundDisablesAndFailsOver(t 
 }
 
 func TestGeminiForward_VertexServiceAccountNotFoundDisablesAndFailsOver(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	useVertexTokenEndpoint(t, http.StatusBadRequest, vertexAccountNotFoundTokenBody)
 	svc, httpStub, repo := newVertexTokenErrorService()
 	rec := httptest.NewRecorder()
@@ -173,7 +171,6 @@ func TestGeminiForward_VertexServiceAccountNotFoundDisablesAndFailsOver(t *testi
 }
 
 func TestGeminiForwardAsChatCompletions_VertexServiceAccountNotFoundDisablesAndFailsOver(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	useVertexTokenEndpoint(t, http.StatusBadRequest, vertexAccountNotFoundTokenBody)
 	svc, httpStub, repo := newVertexTokenErrorService()
 	rec := httptest.NewRecorder()
@@ -188,7 +185,6 @@ func TestGeminiForwardAsChatCompletions_VertexServiceAccountNotFoundDisablesAndF
 }
 
 func TestGeminiForwardNative_OtherVertexTokenErrorKeepsAccountState(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	useVertexTokenEndpoint(t, http.StatusBadRequest, `{"error":"invalid_grant","error_description":"Invalid JWT Signature."}`)
 	svc, httpStub, repo := newVertexTokenErrorService()
 	c, rec := newGeminiNativeTestContext(t)

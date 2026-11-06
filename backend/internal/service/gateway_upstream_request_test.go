@@ -58,7 +58,6 @@ func TestGatewayBuildUpstreamRequestRejectsForeignOAuthWithoutPenalty(t *testing
 
 // Scenario: count_tokens 对不匹配凭据按「平台不支持」返回 404，不取 token、不出站
 func TestForwardCountTokensRejectsForeignOAuthAsUnsupported(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages/count_tokens", nil)

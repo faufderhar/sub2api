@@ -35,7 +35,6 @@ func TestUpstreamResponseModelObserverSupportsAnthropicAndGeminiShapes(t *testin
 }
 
 func TestUpstreamResponseModelObservationAttemptReset(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(nil)
 
 	first := beginUpstreamResponseModelObservation(c)
@@ -184,7 +183,6 @@ func TestObserveAntigravityGeminiSSELineReadsWrapperModelWithoutUnwrap(t *testin
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gin.SetMode(gin.TestMode)
 			c, _ := gin.CreateTestContext(nil)
 			beginUpstreamResponseModelObservation(c)
 
@@ -278,7 +276,6 @@ func TestUpstreamResponseModelObserverServiceTierAnthropicSpeed(t *testing.T) {
 }
 
 func TestObservedUpstreamResponseServiceTierFromContext(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(nil)
 	require.Equal(t, "", observedUpstreamResponseServiceTier(c))
 

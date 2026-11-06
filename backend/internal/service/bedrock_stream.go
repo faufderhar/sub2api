@@ -17,6 +17,7 @@ import (
 	"github.com/tidwall/sjson"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/safego"
 )
 
 // handleBedrockStreamingResponse 处理 Bedrock InvokeModelWithResponseStream 的 EventStream 响应
@@ -72,6 +73,7 @@ func (s *GatewayService) handleBedrockStreamingResponse(
 	lastReadAt.Store(time.Now().UnixNano())
 
 	go func() {
+		defer safego.Recover("bedrock.eventstream_reader")
 		defer close(events)
 		for {
 			payload, err := decoder.Decode()

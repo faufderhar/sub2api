@@ -82,6 +82,9 @@ type ChannelMonitorService struct {
 	// 之后构造，构造参数注入会破坏既有依赖顺序）。nil 时 fail-closed：
 	// 配额模式的检测产出「未配置」错误快照，Create/Update 关联账号直接报错。
 	quotaFetcher *ChannelMonitorQuotaFetcher
+	// encryptionKeyEphemeral（M-5）：加密 key 为进程内临时 key 时为 true，所有加密写入入口拒绝。
+	// 由 wire 通过 SetEncryptionKeyConfigured 注入；未注入（测试）时视为已配置。
+	encryptionKeyEphemeral bool
 }
 
 const maxChannelMonitorNameRunes = 100
@@ -95,6 +98,21 @@ const ChannelMonitorDuplicateOperationIDMetadataKey = "sub2api:duplicate_operati
 // NewChannelMonitorService 创建渠道监控服务实例。
 func NewChannelMonitorService(repo ChannelMonitorRepository, encryptor SecretEncryptor) *ChannelMonitorService {
 	return &ChannelMonitorService{repo: repo, encryptor: encryptor}
+}
+
+// SetEncryptionKeyConfigured 注入加密 key 是否持久（cfg.Totp.EncryptionKeyConfigured）。
+func (s *ChannelMonitorService) SetEncryptionKeyConfigured(configured bool) {
+	if s == nil {
+		return
+	}
+	s.encryptionKeyEphemeral = !configured
+}
+
+func (s *ChannelMonitorService) requirePersistentEncryptionKey() error {
+	if s != nil && s.encryptionKeyEphemeral {
+		return ErrEncryptionKeyNotPersistent
+	}
+	return nil
 }
 
 // SetRuntimeReader injects the settings reader used to gate active probes.
@@ -146,6 +164,9 @@ func (s *ChannelMonitorService) Get(ctx context.Context, id int64) (*ChannelMoni
 
 // Create 创建监控（内部加密 api_key）。
 func (s *ChannelMonitorService) Create(ctx context.Context, p ChannelMonitorCreateParams) (*ChannelMonitor, error) {
+	if err := s.requirePersistentEncryptionKey(); err != nil {
+		return nil, err
+	}
 	if err := validateCreateParams(p); err != nil {
 		return nil, err
 	}
@@ -219,6 +240,9 @@ func (s *ChannelMonitorService) Duplicate(
 
 	plainAPIKey, err := s.decryptAPIKeyForDuplicate(source)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.requirePersistentEncryptionKey(); err != nil {
 		return nil, err
 	}
 	encryptedAPIKey, err := s.encryptor.Encrypt(plainAPIKey)
@@ -497,6 +521,10 @@ func (s *ChannelMonitorService) validateProbeAPIKey(m *ChannelMonitor, newPlainK
 	}
 	plain, err := s.encryptor.Decrypt(m.APIKey)
 	if err != nil {
+		// M-5：不再静默吞错。密文损坏本身仍交给 APIKeyDecryptFailed 链路（Get/RunCheck 显式报错），
+		// 这里只记录日志，不阻断与 key 无关的更新。
+		slog.Warn("channel_monitor: decrypt stored api key failed during update validation",
+			"monitor_id", m.ID, "error", err)
 		return nil
 	}
 	if strings.TrimSpace(plain) == "" {
@@ -553,6 +581,9 @@ func (s *ChannelMonitorService) revalidateLinkedAccount(ctx context.Context, m *
 func (s *ChannelMonitorService) applyAPIKeyUpdate(existing *ChannelMonitor, raw *string) (plain string, updated bool, err error) {
 	if raw == nil || strings.TrimSpace(*raw) == "" {
 		return "", false, nil
+	}
+	if keyErr := s.requirePersistentEncryptionKey(); keyErr != nil {
+		return "", false, keyErr
 	}
 	plain = strings.TrimSpace(*raw)
 	encrypted, encErr := s.encryptor.Encrypt(plain)

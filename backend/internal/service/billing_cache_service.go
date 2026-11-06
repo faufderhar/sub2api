@@ -930,7 +930,8 @@ func (s *BillingCacheService) checkSimpleModeAPIKeyRateLimits(ctx context.Contex
 //  3. user.rpm_limit                  — 用户级全局硬上限：无论 override/group 如何配置，始终生效。
 //
 // 与旧版"级联互斥"设计不同，新版确保 user.rpm_limit 作为全局天花板不会被 group 或 override 覆盖。
-// Redis 故障一律 fail-open（打 warning，不阻塞业务）。
+// Redis 故障按 concurrency.redis_failure_policy 处理（L-7）：默认 fail_open（打 warning，不阻塞业务）；
+// fail_close 时打 warning 并返回 ErrBillingServiceUnavailable（503）。
 func (s *BillingCacheService) checkRPM(ctx context.Context, user *User, group *Group) error {
 	if s == nil || s.userRPMCache == nil || user == nil {
 		return nil
@@ -965,7 +966,9 @@ func (s *BillingCacheService) checkRPM(ctx context.Context, user *User, group *G
 						"Warning: rpm increment (override) failed for user=%d group=%d: %v",
 						user.ID, group.ID, incErr,
 					)
-					// fail-open
+					if s.rpmFailClose() {
+						return ErrBillingServiceUnavailable
+					}
 				} else if count > *override {
 					return ErrGroupRPMExceeded
 				}
@@ -980,7 +983,9 @@ func (s *BillingCacheService) checkRPM(ctx context.Context, user *User, group *G
 					"Warning: rpm increment (group) failed for user=%d group=%d: %v",
 					user.ID, group.ID, err,
 				)
-				// fail-open
+				if s.rpmFailClose() {
+					return ErrBillingServiceUnavailable
+				}
 			} else if count > group.RPMLimit {
 				return ErrGroupRPMExceeded
 			}
@@ -996,6 +1001,9 @@ func (s *BillingCacheService) checkRPM(ctx context.Context, user *User, group *G
 				"Warning: rpm increment (user) failed for user=%d: %v",
 				user.ID, err,
 			)
+			if s.rpmFailClose() {
+				return ErrBillingServiceUnavailable
+			}
 			return nil // fail-open
 		}
 		if count > user.RPMLimit {
@@ -1004,6 +1012,15 @@ func (s *BillingCacheService) checkRPM(ctx context.Context, user *User, group *G
 	}
 
 	return nil
+}
+
+// rpmFailClose 报告 RPM 限流在 Redis 故障时是否 fail_close（L-7），并打 warning。
+func (s *BillingCacheService) rpmFailClose() bool {
+	if s == nil || s.cfg == nil || !s.cfg.Concurrency.RedisFailClose() {
+		return false
+	}
+	logger.LegacyPrintf("service.billing_cache", "Warning: rpm check rejected because redis is unavailable (redis_failure_policy=fail_close)")
+	return true
 }
 
 func (s *BillingCacheService) minimumBalanceReserve() float64 {

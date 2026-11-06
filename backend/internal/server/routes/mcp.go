@@ -18,16 +18,18 @@ var mcpRateLimitOptions = ratelimit.RateLimitOptions{FailureMode: ratelimit.Rate
 
 // RegisterMCPRoutes exposes MCP over HTTP and reuses the normal management
 // routes in a private router, preserving ownership checks, guards and audit.
+// maxBodyBytes bounds the JSON-RPC body (T-3, server.mcp_max_request_body_size; <=0 uses 16MB).
 func RegisterMCPRoutes(v1 *gin.RouterGroup, h *handler.Handlers, audit middleware.AuditLogMiddleware,
 	stepUp middleware.StepUpAuthMiddleware, settings *service.SettingService,
 	limiter *middleware.PanelRateLimiter, allowedOrigins []string, redisClient *redis.Client,
+	maxBodyBytes int64,
 ) {
 	inner := gin.New()
 	inner.Use(gin.Recovery())
 	api := inner.Group("/api/v1")
 	RegisterUserRoutes(api, h, middleware.JWTAuthMiddleware(managementmcp.DispatchAuth(false)), audit, settings, limiter)
 	RegisterAdminRoutes(api, h, middleware.AdminAuthMiddleware(managementmcp.DispatchAuth(true)), audit, stepUp, settings, limiter)
-	transport := managementmcp.NewHandler(inner, allowedOrigins)
+	transport := managementmcp.NewHandlerWithLimit(inner, allowedOrigins, maxBodyBytes)
 	var handlers []gin.HandlerFunc
 	if redisClient != nil {
 		// Bound token probes per network before authentication reaches the database.

@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/safego"
 )
 
 // errAnthropicNativeStreamIdle 表示上游流读间隔超时（见上方文件注释）。
@@ -58,6 +59,7 @@ func newAnthropicNativeLinePump(scanner *bufio.Scanner, interval time.Duration) 
 		p.timer = time.NewTimer(interval)
 	}
 	go func() {
+		defer safego.Recover("openai.anthropic_native_pump_sse_reader")
 		defer close(p.events)
 		for scanner.Scan() {
 			select {

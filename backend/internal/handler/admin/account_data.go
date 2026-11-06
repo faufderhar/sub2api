@@ -11,6 +11,7 @@ import (
 	"log/slog"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/lifecycle"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -477,9 +478,13 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 					slog.Error("import_antigravity_privacy_panic", "recover", r)
 				}
 			}()
-			bgCtx := context.Background()
 			for _, acc := range privacyAccounts {
-				adminSvc.ForceAntigravityPrivacy(bgCtx, acc)
+				taskCtx, cancel := lifecycle.Detached(ctx, adminPrivacyTaskTimeout)
+				adminSvc.ForceAntigravityPrivacy(taskCtx, acc)
+				cancel()
+				if lifecycle.Context().Err() != nil {
+					return
+				}
 			}
 			slog.Info("import_antigravity_privacy_done", "count", len(privacyAccounts))
 		}()

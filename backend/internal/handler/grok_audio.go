@@ -4,12 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
+	pkghttputil "github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
@@ -202,6 +202,10 @@ func (h *OpenAIGatewayHandler) GrokVoice(c *gin.Context, endpoint string) {
 	}
 
 	body, err := readGrokVoiceGatewayBody(c)
+	if errors.Is(err, errGrokVoiceBodyTooLarge) {
+		h.errorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", err.Error())
+		return
+	}
 	if err != nil {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return
@@ -383,8 +387,22 @@ func readGrokVoiceGatewayBody(c *gin.Context) ([]byte, error) {
 		}
 		return nil, errors.New("request body is required")
 	}
-	return io.ReadAll(c.Request.Body)
+	// M-6：有界读取。路由层已有 gateway.max_body_size 限制，这里再加显式上限，防止绕过中间件时无界缓冲。
+	body, err := pkghttputil.ReadResponseBody(c.Request.Body, grokVoiceGatewayMaxBodyBytes)
+	if err != nil {
+		if errors.Is(err, pkghttputil.ErrResponseBodyTooLarge) {
+			return nil, errGrokVoiceBodyTooLarge
+		}
+		return nil, err
+	}
+	return body, nil
 }
+
+// grokVoiceGatewayMaxBodyBytes 是 Grok 语音（TTS/STT）请求体的上限（M-6）：64 MiB，
+// 足够常见音频上传；超限返回 413。
+var grokVoiceGatewayMaxBodyBytes int64 = 64 << 20
+
+var errGrokVoiceBodyTooLarge = errors.New("request body too large")
 
 // extractGrokTTSInputText pulls the primary spoken text from a TTS JSON body.
 func extractGrokTTSInputText(body []byte) string {

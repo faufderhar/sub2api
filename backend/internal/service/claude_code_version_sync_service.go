@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/safego"
 )
 
 const (
@@ -61,15 +63,16 @@ func (s *ClaudeCodeVersionSyncService) Start() {
 	}
 	s.wg.Add(1)
 	go func() {
+		defer safego.Recover("scheduler.claude_code_version_sync")
 		defer s.wg.Done()
 		ticker := time.NewTicker(s.interval)
 		defer ticker.Stop()
 
-		s.runInitial()
+		safego.Tick("scheduler.claude_code_version_sync", s.runInitial)
 		for {
 			select {
 			case <-ticker.C:
-				s.runOnce()
+				safego.Tick("scheduler.claude_code_version_sync", s.runOnce)
 			case <-s.stopCh:
 				return
 			}

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/safego"
 	"go.uber.org/zap"
 	"golang.org/x/sync/singleflight"
 )
@@ -230,6 +231,9 @@ const (
 // ConcurrencyService 管理账号和用户的并发限制。
 type ConcurrencyService struct {
 	cache ConcurrencyCache
+
+	// redisFailClose（L-7）：Redis 故障时等待队列计数是否 fail_close（默认 false = fail_open）。
+	redisFailClose atomic.Bool
 
 	accountLoadCacheTTL atomic.Int64
 	accountLoadCacheMu  sync.RWMutex
@@ -489,6 +493,25 @@ func zeroAPIKeyConcurrencyMap(apiKeyIDs []int64) map[int64]int {
 // Wait Queue Count Methods
 // ============================================
 
+// SetRedisFailClose 设置 Redis 故障策略（L-7）：true = fail_close，false = fail_open（默认）。
+func (s *ConcurrencyService) SetRedisFailClose(failClose bool) {
+	if s == nil {
+		return
+	}
+	s.redisFailClose.Store(failClose)
+}
+
+// waitCountOnRedisError 按 L-7 策略处理等待队列计数的 Redis 错误：
+// fail_open 放行（返回 true）；fail_close 按队列已满处理（返回 false → 调用方返回 429）。两种模式都打 warning。
+func (s *ConcurrencyService) waitCountOnRedisError(kind string, id int64, err error) bool {
+	if s.redisFailClose.Load() {
+		logger.LegacyPrintf("service.concurrency", "Warning: increment wait count failed for %s %d: %v (redis_failure_policy=fail_close, rejecting)", kind, id, err)
+		return false
+	}
+	logger.LegacyPrintf("service.concurrency", "Warning: increment wait count failed for %s %d: %v (redis_failure_policy=fail_open, allowing)", kind, id, err)
+	return true
+}
+
 // IncrementWaitCount attempts to increment the wait queue counter for a user.
 // Returns true if successful, false if the wait queue is full.
 // maxWait should be user.Concurrency + defaultExtraWaitSlots
@@ -500,9 +523,8 @@ func (s *ConcurrencyService) IncrementWaitCount(ctx context.Context, userID int6
 
 	result, err := s.cache.IncrementWaitCount(ctx, userID, maxWait)
 	if err != nil {
-		// On error, allow the request to proceed (fail open)
-		logger.LegacyPrintf("service.concurrency", "Warning: increment wait count failed for user %d: %v", userID, err)
-		return true, nil
+		// L-7：按 concurrency.redis_failure_policy 处理（默认 fail_open）。
+		return s.waitCountOnRedisError("user", userID, err), nil
 	}
 	return result, nil
 }
@@ -531,8 +553,8 @@ func (s *ConcurrencyService) IncrementAccountWaitCount(ctx context.Context, acco
 
 	result, err := s.cache.IncrementAccountWaitCount(ctx, accountID, maxWait)
 	if err != nil {
-		logger.LegacyPrintf("service.concurrency", "Warning: increment wait count failed for account %d: %v", accountID, err)
-		return true, nil
+		// L-7：按 concurrency.redis_failure_policy 处理（默认 fail_open）。
+		return s.waitCountOnRedisError("account", accountID, err), nil
 	}
 	return result, nil
 }
@@ -737,12 +759,13 @@ func (s *ConcurrencyService) StartSlotCleanupWorker(_ AccountRepository, interva
 	}
 
 	go func() {
+		defer safego.Recover("scheduler.concurrency_cleanup")
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 
-		runCleanup()
+		safego.Tick("scheduler.concurrency_cleanup", runCleanup)
 		for range ticker.C {
-			runCleanup()
+			safego.Tick("scheduler.concurrency_cleanup", runCleanup)
 		}
 	}()
 }

@@ -116,6 +116,9 @@ type poolSettings struct {
 	maxConnsPerHost       int           // 每主机最大连接数（含活跃）
 	idleConnTimeout       time.Duration // 空闲连接超时时间
 	responseHeaderTimeout time.Duration // 等待响应头超时时间
+	// dialGuardAll（M-3）：直连时对所有请求在拨号层校验实际 IP（security.url_allowlist 启用且不允许私网时为 true）。
+	// 为 false 时仍对带 WithHTTPUpstreamPublicHostsOnly 标记的请求校验。不参与 poolKey（由静态配置决定）。
+	dialGuardAll bool
 }
 
 type openAIHTTP2Settings struct {
@@ -561,6 +564,7 @@ func (s *httpUpstreamService) getClientEntryWithTLS(proxyURL string, accountID i
 	}
 	settings := s.resolvePoolSettings(isolation, accountConcurrency)
 	settings = s.applyProfilePoolSettings(settings, upstreamProfile)
+	settings.dialGuardAll = s.shouldValidateResolvedIP()
 	// TLS 指纹客户端使用独立的缓存键，加 "tls:" 前缀
 	cacheKey := "tls:" + buildCacheKey(isolation, proxyKey, accountID, upstreamProtocolModeDefault)
 	poolKey := buildPoolKey(settings, upstreamProtocolModeDefault) + ":tls"
@@ -724,6 +728,7 @@ func (s *httpUpstreamService) getClientEntry(proxyURL string, accountID int64, a
 	protocolMode := s.resolveProtocolMode(profile, proxyKey, parsedProxy)
 	settings := s.resolvePoolSettings(isolation, accountConcurrency)
 	settings = s.applyProfilePoolSettings(settings, profile)
+	settings.dialGuardAll = s.shouldValidateResolvedIP()
 	// 构建缓存键（根据隔离策略不同）
 	cacheKey := buildCacheKey(isolation, proxyKey, accountID, protocolMode)
 	// 构建连接池配置键（用于检测配置变更）
@@ -1358,6 +1363,17 @@ func newUpstreamDialer() *net.Dialer {
 	}
 }
 
+// newGuardedUpstreamDialer（M-3）返回在 connect 前校验实际 IP 的直连 dialer：
+// guardAll 为 true 时所有请求都校验，否则仅校验带 WithHTTPUpstreamPublicHostsOnly 标记的请求。
+// 只用于直连；走代理时拨的是代理地址，不在这里校验。
+func newGuardedUpstreamDialer(guardAll bool) *net.Dialer {
+	d := newUpstreamDialer()
+	d.ControlContext = urlvalidator.DialControlContext(func(ctx context.Context) bool {
+		return guardAll || service.HTTPUpstreamPublicHostsOnly(ctx)
+	})
+	return d
+}
+
 // buildUpstreamTransport 构建上游请求的 Transport
 // 使用配置文件中的连接池参数，支持生产环境调优
 //
@@ -1402,6 +1418,10 @@ func buildUpstreamTransport(settings poolSettings, proxyURL *url.URL, protocolMo
 		// 显式禁用 HTTP/2，确保代理不兼容场景回退到 HTTP/1.1。
 		transport.ForceAttemptHTTP2 = false
 		transport.TLSNextProto = make(map[string]func(string, *tls.Conn) http.RoundTripper)
+	}
+	if proxyURL == nil {
+		// M-3：直连时在拨号层校验实际 IP；走代理时拨的是代理地址，保持原 dialer。
+		transport.DialContext = newGuardedUpstreamDialer(settings.dialGuardAll).DialContext
 	}
 	if err := proxyutil.ConfigureTransportProxy(transport, proxyURL); err != nil {
 		return nil, err
@@ -1460,7 +1480,7 @@ func buildUpstreamTransportWithTLSFingerprint(settings poolSettings, proxyURL *u
 	if proxyURL == nil {
 		// 直连：使用 TLSFingerprintDialer
 		slog.Debug("tls_fingerprint_transport_direct")
-		dialer := tlsfingerprint.NewDialer(profile, nil)
+		dialer := tlsfingerprint.NewDialer(profile, newGuardedUpstreamDialer(settings.dialGuardAll).DialContext)
 		transport.DialTLSContext = dialer.DialTLSContext
 	} else {
 		scheme := strings.ToLower(proxyURL.Scheme)

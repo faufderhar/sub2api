@@ -37,7 +37,6 @@ func runOpenAIOAuthNonStreamRegression(t *testing.T, passthrough bool, requestBo
 
 func runOpenAIOAuthNonStreamRegressionWithHeader(t *testing.T, passthrough bool, requestBody string, upstreamHeader http.Header, sseBody string) (*httptest.ResponseRecorder, *httpUpstreamRecorder, *OpenAIForwardResult) {
 	t.Helper()
-	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))

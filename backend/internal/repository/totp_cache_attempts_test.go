@@ -220,3 +220,26 @@ func TestTotpVerifyCodeFailsClosedWhenRedisDown(t *testing.T) {
 	require.Error(t, err)
 	require.Equal(t, 503, infraerrors.Code(err))
 }
+
+// T-2（D10a）：TOTP 失败计数按用户存储（key 只含 userID，不含 IP）；不同用户互不影响。
+func TestT2_TotpAttemptCounterKeyIsPerUser(t *testing.T) {
+	mr, cache := newTotpTestCache(t)
+	ctx := context.Background()
+	for i := 0; i < 5; i++ {
+		ok, err := cache.ReserveVerifyAttempt(ctx, 41, 5)
+		require.NoError(t, err)
+		require.True(t, ok)
+	}
+	ok, err := cache.ReserveVerifyAttempt(ctx, 41, 5)
+	require.NoError(t, err)
+	require.False(t, ok, "user 41 is locked regardless of client IP")
+	ok, err = cache.ReserveVerifyAttempt(ctx, 42, 5)
+	require.NoError(t, err)
+	require.True(t, ok, "another user is unaffected")
+	keys := mr.Keys()
+	require.Contains(t, keys, "totp:attempts:41")
+	require.Contains(t, keys, "totp:attempts:42")
+	for _, k := range keys {
+		require.NotContains(t, k, "127.0.0.1")
+	}
+}

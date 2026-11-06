@@ -34,7 +34,7 @@ const (
 
 // DefaultCSPPolicy is the default Content-Security-Policy with nonce support
 // __CSP_NONCE__ will be replaced with actual nonce at request time by the SecurityHeaders middleware
-const DefaultCSPPolicy = "default-src 'self'; worker-src 'self' blob:; script-src 'self' __CSP_NONCE__ https://challenges.cloudflare.com https://*.alicdn.com https://static.cloudflareinsights.com https://turing.captcha.qcloud.com https://turing.captcha.gtimg.com https://ca.turing.captcha.qcloud.com https://global.turing.captcha.gtimg.com https://www.tycaptcha.com https://cloudcache.tencentcs.com https://*.stripe.com https://static.airwallex.com https://checkout.airwallex.com https://static-demo.airwallex.com https://checkout-demo.airwallex.com; style-src 'self' 'unsafe-inline' https://*.captcha.gtimg.com https://fonts.googleapis.com https://*.alicdn.com https://static.airwallex.com https://checkout.airwallex.com https://static-demo.airwallex.com https://checkout-demo.airwallex.com; img-src 'self' data: blob: https:; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self' https://turing.captcha.qcloud.com https://www.tycaptcha.com https://rce.tencentrio.com https:; frame-src 'self' https://challenges.cloudflare.com https://turing.captcha.qcloud.com https://ca.turing.captcha.qcloud.com https://www.tycaptcha.com https://*.stripe.com https://checkout.airwallex.com https://checkout-demo.airwallex.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+const DefaultCSPPolicy = "default-src 'self'; worker-src 'self' blob:; script-src 'self' __CSP_NONCE__ https://challenges.cloudflare.com https://o.alicdn.com https://g.alicdn.com https://x.alicdn.com https://static.cloudflareinsights.com https://turing.captcha.qcloud.com https://turing.captcha.gtimg.com https://ca.turing.captcha.qcloud.com https://global.turing.captcha.gtimg.com https://www.tycaptcha.com https://cloudcache.tencentcs.com https://js.stripe.com https://*.js.stripe.com https://static.airwallex.com https://checkout.airwallex.com https://static-demo.airwallex.com https://checkout-demo.airwallex.com; style-src 'self' 'unsafe-inline' https://*.captcha.gtimg.com https://fonts.googleapis.com https://o.alicdn.com https://g.alicdn.com https://x.alicdn.com https://static.airwallex.com https://checkout.airwallex.com https://static-demo.airwallex.com https://checkout-demo.airwallex.com; img-src 'self' data: blob: https:; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self' https://turing.captcha.qcloud.com https://www.tycaptcha.com https://rce.tencentrio.com https:; frame-src 'self' https://challenges.cloudflare.com https://turing.captcha.qcloud.com https://ca.turing.captcha.qcloud.com https://www.tycaptcha.com https://js.stripe.com https://*.js.stripe.com https://hooks.stripe.com https://checkout.airwallex.com https://checkout-demo.airwallex.com; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
 
 // UMQ（用户消息队列）模式常量
 const (
@@ -62,6 +62,10 @@ const (
 // 128 MB 可容纳 2-3 张 4K PNG（base64 膨胀 33%，单张 4K PNG 最坏约 67MB base64）。
 // 可通过 gateway.upstream_response_read_max_bytes 配置项覆盖。
 const DefaultUpstreamResponseReadMaxBytes int64 = 128 * 1024 * 1024
+
+// DefaultGatewayMaxLineSize 上游 SSE 单行默认上限（M-6/D5a：由 500MB 下调为 16MB）。
+// 超大 base64 图片等场景可通过 gateway.max_line_size 调大。
+const DefaultGatewayMaxLineSize = 16 * 1024 * 1024
 
 // DefaultModelsListReadMaxBytes 上游模型列表响应体的默认读取上限。
 // 可通过 gateway.models_list_read_max_bytes 配置项覆盖。
@@ -751,6 +755,7 @@ type ServerConfig struct {
 	APIMaxRequestBodySize    int64     `mapstructure:"api_max_request_body_size"`   // 非网关路由请求体上限（默认 1MB，白名单路由使用 MaxRequestBodySize）
 	APIReadTimeout           int       `mapstructure:"api_read_timeout"`            // 非网关路由请求体读取超时（秒），仅读取请求体期间生效
 	APILargeBodyReadTimeout  int       `mapstructure:"api_large_body_read_timeout"` // 大请求体白名单路由的请求体读取超时（秒）
+	MCPMaxRequestBodySize    int64     `mapstructure:"mcp_max_request_body_size"`   // T-3：MCP 传输路由（POST /api/v1/mcp）请求体上限（默认 16MB）
 	H2C                      H2CConfig `mapstructure:"h2c"`                         // HTTP/2 Cleartext 配置
 }
 
@@ -799,6 +804,11 @@ type SecurityConfig struct {
 	// （SECURITY_TRUST_FORWARDED_IP_FOR_API_KEY_ACL）显式写了该项；只用于 BD-1 一次性迁移判断。
 	TrustForwardedIPForAPIKeyACLExplicit bool     `mapstructure:"-" yaml:"-"`
 	ForwardedClientIPHeaders             []string `mapstructure:"forwarded_client_ip_headers" json:"forwarded_client_ip_headers" yaml:"forwarded_client_ip_headers"`
+	// HonorForwardedClientIPHeadersFromTrustedProxies（T-5，默认 false）：兼容开关关闭（新模式）时，
+	// 若直连地址在 server.trusted_proxies 内，按 forwarded_client_ip_headers 的顺序优先采用
+	// 「恰好一行、单个合法 IP」的单值头（如 CF-Connecting-IP），再回退到 X-Forwarded-For 链。
+	// 直连不可信时这些头一律忽略。
+	HonorForwardedClientIPHeadersFromTrustedProxies bool `mapstructure:"honor_forwarded_client_ip_headers_from_trusted_proxies"`
 	// LoginLockout 按「账号（登录邮箱）+ 客户端 IP」计数的密码登录失败锁定。
 	LoginLockout                  LoginLockoutConfig                         `mapstructure:"login_lockout"`
 	forwardedClientIPSettingsLive *atomic.Pointer[ForwardedClientIPSettings] `mapstructure:"-" json:"-" yaml:"-"`
@@ -815,7 +825,8 @@ type LoginLockoutConfig struct {
 }
 
 const (
-	DefaultAPIMaxRequestBodySize          = 1 << 20 // 1MB
+	DefaultAPIMaxRequestBodySize          = 1 << 20  // 1MB
+	DefaultMCPMaxRequestBodySize          = 16 << 20 // 16MB（T-3/D11a）
 	DefaultAPIReadTimeoutSeconds          = 30
 	DefaultAPILargeBodyReadTimeoutSeconds = 600
 )
@@ -1044,6 +1055,20 @@ type CircuitBreakerConfig struct {
 type ConcurrencyConfig struct {
 	// PingInterval: 并发等待期间的 SSE ping 间隔（秒）
 	PingInterval int `mapstructure:"ping_interval"`
+	// RedisFailurePolicy（L-7）：Redis 故障时并发等待队列计数与用户/分组 RPM 限流的处理策略。
+	// fail_open（默认，D7a）：放行并打 warning；fail_close：拒绝（等待队列按已满处理返回 429，
+	// RPM 返回 503 BILLING_SERVICE_ERROR）并打 warning。
+	RedisFailurePolicy string `mapstructure:"redis_failure_policy"`
+}
+
+const (
+	RedisFailurePolicyFailOpen  = "fail_open"
+	RedisFailurePolicyFailClose = "fail_close"
+)
+
+// RedisFailClose 报告是否配置为 fail_close（空值 / 未知值按默认 fail_open 处理；未知值由 Validate 拒绝）。
+func (c ConcurrencyConfig) RedisFailClose() bool {
+	return strings.EqualFold(strings.TrimSpace(c.RedisFailurePolicy), RedisFailurePolicyFailClose)
 }
 
 type ImageConcurrencyConfig struct {
@@ -1087,6 +1112,9 @@ type GatewayConfig struct {
 	MaxBodySize int64 `mapstructure:"max_body_size"`
 	// TextMaxBodySize limits endpoints that cannot carry inline image/video payloads.
 	TextMaxBodySize int64 `mapstructure:"text_max_body_size"`
+	// RequestBodyReadTimeout（T-4 第二轮，秒）：网关路由读取请求体的最长时间，只约束读 body，
+	// body 读完（EOF）即解除，不影响上游 SSE/流式响应。0 = 关闭（默认，D12a），行为与旧版一致。
+	RequestBodyReadTimeout int `mapstructure:"request_body_read_timeout"`
 	// 非流式上游响应体读取上限（字节），用于防止无界读取导致内存放大
 	UpstreamResponseReadMaxBytes int64 `mapstructure:"upstream_response_read_max_bytes"`
 	// 上游模型列表响应体读取上限（字节）
@@ -1662,17 +1690,8 @@ type DatabaseConfig struct {
 }
 
 func (d *DatabaseConfig) DSN() string {
-	// 当密码为空时不包含 password 参数，避免 libpq 解析错误
-	if d.Password == "" {
-		return fmt.Sprintf(
-			"host=%s port=%d user=%s dbname=%s sslmode=%s",
-			d.Host, d.Port, d.User, d.DBName, d.SSLMode,
-		)
-	}
-	return fmt.Sprintf(
-		"host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
-		d.Host, d.Port, d.User, d.Password, d.DBName, d.SSLMode,
-	)
+	// 所有值按 libpq 规则加引号；密码为空时不包含 password 参数。
+	return BuildPostgresDSN(d.Host, d.Port, d.User, d.Password, d.DBName, d.SSLMode)
 }
 
 // DSNWithTimezone returns DSN with timezone setting
@@ -1680,17 +1699,7 @@ func (d *DatabaseConfig) DSNWithTimezone(tz string) string {
 	if tz == "" {
 		tz = "Asia/Shanghai"
 	}
-	// 当密码为空时不包含 password 参数，避免 libpq 解析错误
-	if d.Password == "" {
-		return fmt.Sprintf(
-			"host=%s port=%d user=%s dbname=%s sslmode=%s TimeZone=%s",
-			d.Host, d.Port, d.User, d.DBName, d.SSLMode, tz,
-		)
-	}
-	return fmt.Sprintf(
-		"host=%s port=%d user=%s password=%s dbname=%s sslmode=%s TimeZone=%s",
-		d.Host, d.Port, d.User, d.Password, d.DBName, d.SSLMode, tz,
-	)
+	return BuildPostgresDSN(d.Host, d.Port, d.User, d.Password, d.DBName, d.SSLMode, PostgresDSNParam{"TimeZone", tz})
 }
 
 // RedisConfig Redis 连接配置
@@ -1777,11 +1786,15 @@ type JWTConfig struct {
 // TotpConfig TOTP 双因素认证配置
 type TotpConfig struct {
 	// EncryptionKey 用于加密 TOTP 密钥的 AES-256 密钥（32 字节 hex 编码）
-	// 如果为空，将自动生成一个随机密钥（仅适用于开发环境）
+	// 如果为空，将自动生成并持久化到数据目录的 totp_encryption.key（M-5 / D3a）
 	EncryptionKey string `mapstructure:"encryption_key"`
-	// EncryptionKeyConfigured 标记加密密钥是否为手动配置（非自动生成）
-	// 只有手动配置了密钥才允许在管理后台启用 TOTP 功能
+	// EncryptionKeyConfigured 标记加密密钥是否在重启后保持不变：显式配置，或 M-5 自动生成并已持久化到数据目录。
+	// 为 false 仅表示使用了进程内临时 key（数据目录不可写）；此时 TOTP 及其他长期密文入口会拒绝写入。
 	EncryptionKeyConfigured bool `mapstructure:"-"`
+	// EncryptionKeySource 记录 key 来源：explicit / persisted_file / generated_persisted / ephemeral。
+	EncryptionKeySource string `mapstructure:"-"`
+	// EncryptionKeyFile 为使用持久化文件时的文件路径（显式配置时为空）。
+	EncryptionKeyFile string `mapstructure:"-"`
 }
 
 type TurnstileConfig struct {
@@ -2063,18 +2076,9 @@ func load(allowMissingJWTSecret bool) (*Config, error) {
 		cfg.Gateway.UserMessageQueue.Mode = ""
 	}
 
-	// Auto-generate TOTP encryption key if not set (32 bytes = 64 hex chars for AES-256)
-	cfg.Totp.EncryptionKey = strings.TrimSpace(cfg.Totp.EncryptionKey)
-	if cfg.Totp.EncryptionKey == "" {
-		key, err := generateJWTSecret(32) // Reuse the same random generation function
-		if err != nil {
-			return nil, fmt.Errorf("generate totp encryption key error: %w", err)
-		}
-		cfg.Totp.EncryptionKey = key
-		cfg.Totp.EncryptionKeyConfigured = false
-		slog.Warn("TOTP encryption key auto-generated. Consider setting a fixed key for production.")
-	} else {
-		cfg.Totp.EncryptionKeyConfigured = true
+	// M-5（D3a）：未显式配置 TOTP 加密密钥时自动生成并持久化到数据目录（见 encryption_key_store.go）。
+	if err := resolveTotpEncryptionKey(&cfg.Totp, ResolveDataDir()); err != nil {
+		return nil, err
 	}
 
 	originalJWTSecret := cfg.JWT.Secret
@@ -2145,6 +2149,7 @@ func setDefaults() {
 	viper.SetDefault("server.max_request_body_size", int64(256*1024*1024))
 	// M-1：非网关路由默认 1MB 请求体上限与请求体读取超时
 	viper.SetDefault("server.api_max_request_body_size", int64(DefaultAPIMaxRequestBodySize))
+	viper.SetDefault("server.mcp_max_request_body_size", int64(DefaultMCPMaxRequestBodySize))
 	viper.SetDefault("server.api_read_timeout", DefaultAPIReadTimeoutSeconds)
 	viper.SetDefault("server.api_large_body_read_timeout", DefaultAPILargeBodyReadTimeoutSeconds)
 	// H2C 默认配置
@@ -2324,8 +2329,8 @@ func setDefaults() {
 	viper.SetDefault("database.password", "postgres")
 	viper.SetDefault("database.dbname", "sub2api")
 	viper.SetDefault("database.sslmode", "prefer")
-	viper.SetDefault("database.max_open_conns", 256)
-	viper.SetDefault("database.max_idle_conns", 128)
+	viper.SetDefault("database.max_open_conns", 50) // L-5/D6a: 中小规模默认，高并发见 deploy 文档调参
+	viper.SetDefault("database.max_idle_conns", 10)
 	viper.SetDefault("database.conn_max_lifetime_minutes", 30)
 	viper.SetDefault("database.conn_max_idle_time_minutes", 5)
 	viper.SetDefault("database.user_platform_quota_flusher_enabled", false)
@@ -2341,8 +2346,8 @@ func setDefaults() {
 	viper.SetDefault("redis.dial_timeout_seconds", 5)
 	viper.SetDefault("redis.read_timeout_seconds", 3)
 	viper.SetDefault("redis.write_timeout_seconds", 3)
-	viper.SetDefault("redis.pool_size", 1024)
-	viper.SetDefault("redis.min_idle_conns", 128)
+	viper.SetDefault("redis.pool_size", 128) // L-5/D6a
+	viper.SetDefault("redis.min_idle_conns", 10)
 	viper.SetDefault("redis.enable_tls", false)
 
 	// Batch Image queue
@@ -2634,6 +2639,7 @@ func setDefaults() {
 	viper.SetDefault("gateway.antigravity_extra_retries", 10)
 	viper.SetDefault("gateway.max_body_size", int64(256*1024*1024))
 	viper.SetDefault("gateway.text_max_body_size", int64(32*1024*1024))
+	viper.SetDefault("gateway.request_body_read_timeout", 0) // T-4：默认关闭
 	viper.SetDefault("gateway.upstream_response_read_max_bytes", DefaultUpstreamResponseReadMaxBytes)
 	viper.SetDefault("gateway.models_list_read_max_bytes", DefaultModelsListReadMaxBytes)
 	viper.SetDefault("gateway.proxy_probe_response_read_max_bytes", int64(1024*1024))
@@ -2653,7 +2659,7 @@ func setDefaults() {
 	viper.SetDefault("gateway.image_stream_data_interval_timeout", 900)
 	viper.SetDefault("gateway.image_stream_keepalive_interval", 10)
 	viper.SetDefault("gateway.image_nonstream_keepalive_interval", 0)
-	viper.SetDefault("gateway.max_line_size", 500*1024*1024)
+	viper.SetDefault("gateway.max_line_size", DefaultGatewayMaxLineSize) // M-6/D5a: 16MB
 	viper.SetDefault("gateway.scheduling.sticky_session_max_waiting", 3)
 	viper.SetDefault("gateway.scheduling.sticky_session_wait_timeout", 120*time.Second)
 	viper.SetDefault("gateway.scheduling.fallback_wait_timeout", 30*time.Second)
@@ -2704,6 +2710,8 @@ func setDefaults() {
 
 	viper.SetDefault("gateway.tls_fingerprint.enabled", true)
 	viper.SetDefault("concurrency.ping_interval", 10)
+	viper.SetDefault("concurrency.redis_failure_policy", RedisFailurePolicyFailOpen)
+	viper.SetDefault("security.honor_forwarded_client_ip_headers_from_trusted_proxies", false)
 
 	// TokenRefresh
 	viper.SetDefault("token_refresh.enabled", true)
@@ -2866,6 +2874,12 @@ func (c *Config) Validate() error {
 	}
 	if c.Server.MaxRequestBodySize > 0 && c.Server.APIMaxRequestBodySize > c.Server.MaxRequestBodySize {
 		return fmt.Errorf("server.api_max_request_body_size must not exceed server.max_request_body_size")
+	}
+	if c.Server.MCPMaxRequestBodySize < 0 {
+		return fmt.Errorf("server.mcp_max_request_body_size must be non-negative (0 uses the 16MB default)")
+	}
+	if c.Server.MaxRequestBodySize > 0 && c.Server.MCPMaxRequestBodySize > c.Server.MaxRequestBodySize {
+		return fmt.Errorf("server.mcp_max_request_body_size must not exceed server.max_request_body_size")
 	}
 	if c.Server.APIReadTimeout < 1 || c.Server.APIReadTimeout > 3600 {
 		return fmt.Errorf("server.api_read_timeout must be between 1 and 3600 seconds")
@@ -3480,6 +3494,9 @@ func (c *Config) Validate() error {
 	if c.Gateway.MaxBodySize <= 0 {
 		return fmt.Errorf("gateway.max_body_size must be positive")
 	}
+	if c.Gateway.RequestBodyReadTimeout < 0 {
+		return fmt.Errorf("gateway.request_body_read_timeout must be non-negative (0 disables)")
+	}
 	if c.Gateway.TextMaxBodySize <= 0 || c.Gateway.TextMaxBodySize > c.Gateway.MaxBodySize {
 		return fmt.Errorf("gateway.text_max_body_size must be positive and no greater than gateway.max_body_size")
 	}
@@ -3901,6 +3918,11 @@ func (c *Config) Validate() error {
 	}
 	if c.Concurrency.PingInterval < 5 || c.Concurrency.PingInterval > 30 {
 		return fmt.Errorf("concurrency.ping_interval must be between 5-30 seconds")
+	}
+	switch strings.ToLower(strings.TrimSpace(c.Concurrency.RedisFailurePolicy)) {
+	case "", RedisFailurePolicyFailOpen, RedisFailurePolicyFailClose:
+	default:
+		return fmt.Errorf("concurrency.redis_failure_policy must be %q or %q", RedisFailurePolicyFailOpen, RedisFailurePolicyFailClose)
 	}
 	if c.Gateway.Grok.FreeQuotaSoftGateEnabled {
 		if c.Gateway.Grok.FreeQuotaTokenLimit <= 0 {

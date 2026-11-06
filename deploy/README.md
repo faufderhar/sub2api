@@ -255,7 +255,7 @@ docker compose down -v
 |----------|----------|---------|-------------|
 | `POSTGRES_PASSWORD` | **Yes** | - | PostgreSQL password |
 | `JWT_SECRET` | **Recommended** | *(auto-generated)* | JWT secret (fixed for persistent sessions) |
-| `TOTP_ENCRYPTION_KEY` | **Recommended** | *(auto-generated)* | TOTP encryption key (fixed for persistent 2FA) |
+| `TOTP_ENCRYPTION_KEY` | **Recommended** | *(auto-generated, saved to `${DATA_DIR}/totp_encryption.key`)* | Key for TOTP secrets and other encrypted settings. When set it always wins over the key file (see below) |
 | `SERVER_PORT` | No | `8080` | Server port |
 | `ADMIN_EMAIL` | No | *(auto-generated)* | Admin email (login username) |
 | `ADMIN_PASSWORD` | No | *(auto-generated)* | Admin password (8-72 bytes) |
@@ -269,6 +269,71 @@ docker compose down -v
 See `.env.example` for all available options.
 
 > **Note:** The `docker-deploy.sh` script automatically generates `JWT_SECRET`, `TOTP_ENCRYPTION_KEY`, and `POSTGRES_PASSWORD` for you.
+
+### Encryption key file / 加密密钥文件（M-5）
+
+If `TOTP_ENCRYPTION_KEY` (or `totp.encryption_key`) is **not** set, the first
+start generates a key and saves it to `${DATA_DIR}/totp_encryption.key`
+(`/app/data` in Docker, mode 0600); later starts reuse it, so 2FA and
+encrypted settings survive restarts.
+
+- An explicit `TOTP_ENCRYPTION_KEY` always wins; the key file is then neither
+  read nor modified (a warning is logged if it holds a different key). When
+  switching between the two, keep the same value.
+- If the key file exists but is invalid, startup is refused rather than
+  silently generating a new key.
+- If the file cannot be written, an ephemeral key is used and logged as ERROR;
+  enabling TOTP, channel monitors with API keys and plugin secrets are then
+  refused with `ENCRYPTION_KEY_NOT_PERSISTENT` until a persistent key is set.
+- **Back up `totp_encryption.key` together with the database.** Losing it makes
+  stored TOTP secrets and encrypted settings unreadable. Do not commit it.
+
+未设置 `TOTP_ENCRYPTION_KEY` 时，首次启动会生成密钥并保存到 `${DATA_DIR}/totp_encryption.key`
+（Docker 中为 `/app/data`，权限 0600），之后重启复用。显式设置的环境变量始终优先，不读也不改该文件；
+文件内容无效时拒绝启动；文件写不进去时使用临时密钥并拒绝保存加密配置（`ENCRYPTION_KEY_NOT_PERSISTENT`）。
+请把该文件与数据库一起备份。
+
+### Security-related settings added in this release / 本版新增的安全配置
+
+| Setting | Env | Default | Notes |
+|---------|-----|---------|-------|
+| `server.mcp_max_request_body_size` | `SERVER_MCP_MAX_REQUEST_BODY_SIZE` | `16777216` | T-3: body cap for `POST /api/v1/mcp` |
+| `gateway.request_body_read_timeout` | `GATEWAY_REQUEST_BODY_READ_TIMEOUT` | `0` (off) | T-4: gateway body read timeout in seconds, body-only; see EDGE_SECURITY.md for edge timeouts |
+| `security.honor_forwarded_client_ip_headers_from_trusted_proxies` | `SECURITY_HONOR_FORWARDED_CLIENT_IP_HEADERS_FROM_TRUSTED_PROXIES` | `false` | T-5: honor single-value client-IP headers only from trusted proxies |
+| `concurrency.redis_failure_policy` | `CONCURRENCY_REDIS_FAILURE_POLICY` | `fail_open` | L-7: `fail_close` rejects (429/503) when Redis is down |
+| `security.url_allowlist.allow_private_hosts` | `SECURITY_URL_ALLOWLIST_ALLOW_PRIVATE_HOSTS` | `true` (unchanged) | M-3: when `false`, the dialed IP is also checked (reserved ranges included) |
+| — | `SUB2API_DEBUG_GATEWAY_BODY_MAX_MB` / `_MAX_AGE_HOURS` | `64` / `24` | L-6: debug body dump caps; files 0600 |
+
+Background panics in SSE readers and scheduled jobs are now recovered and
+logged at ERROR with a stack trace (`goroutine panic recovered`, L-3)
+instead of crashing the process or stopping the job loop.
+
+### Connection Pool Sizing / 连接池调参
+
+Built-in defaults target small and medium deployments (1–4 vCPU, PostgreSQL with
+the stock `max_connections=100`):
+
+| Setting | Env | Default | High-concurrency starting point |
+|---------|-----|---------|---------------------------------|
+| `database.max_open_conns` | `DATABASE_MAX_OPEN_CONNS` | `50` | `256` |
+| `database.max_idle_conns` | `DATABASE_MAX_IDLE_CONNS` | `10` | `128` (≈50% of max_open) |
+| `redis.pool_size` | `REDIS_POOL_SIZE` | `128` | `1024`–`4096` |
+| `redis.min_idle_conns` | `REDIS_MIN_IDLE_CONNS` | `10` | `128`–`256` |
+
+Earlier releases defaulted to DB 256/128 and Redis 1024/128. Deployments that set
+these values explicitly are unaffected; high-traffic deployments that relied on
+the old implicit defaults should set them back explicitly.
+
+Rules of thumb:
+- Keep `instances × DATABASE_MAX_OPEN_CONNS` at or below 50–80% of PostgreSQL
+  `max_connections` (`POSTGRES_MAX_CONNECTIONS`).
+- Raise the DB pool when request latency grows while PostgreSQL CPU is idle
+  (callers waiting for a pooled connection); raise the Redis pool when Redis pool
+  timeouts appear in logs under load.
+- Keep `REDIS_MAXCLIENTS` above `instances × REDIS_POOL_SIZE` plus headroom.
+
+中文要点：默认值已下调为 DB 50/10、Redis 128/10，适合中小规模；高并发部署请显式设置为上表右列的起点值，
+并保证 实例数 × DATABASE_MAX_OPEN_CONNS 不超过 PostgreSQL max_connections 的 50%~80%。
 
 ### Easy Migration (Local Directory Version)
 
@@ -412,7 +477,11 @@ curl -sSL https://raw.githubusercontent.com/Wei-Shaw/sub2api/main/deploy/install
    sudo systemctl enable sub2api
    sudo systemctl start sub2api
    ```
-5. Open the Setup Wizard in your browser to complete configuration
+5. Open the Setup Wizard in your browser to complete configuration.
+   The wizard asks for a **setup token** printed in the startup log
+   (`sudo journalctl -u sub2api | grep "Setup token"`, or `docker logs <container> | grep "Setup token"`):
+   `[setup] Setup token: <32 hex chars>`. The token is regenerated on every restart.
+   安装向导需要填写启动日志中打印的 setup token（每次重启都会重新生成）。
 
 ### Commands
 

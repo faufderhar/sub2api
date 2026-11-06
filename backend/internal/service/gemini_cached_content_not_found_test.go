@@ -11,7 +11,6 @@ import (
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
-	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
 
@@ -49,7 +48,6 @@ func geminiDefaultPolicyAPIKeyAccount() *Account {
 const geminiCachedContentRequestBody = `{"cachedContent":"cachedContents/doesnotexist","contents":[{"role":"user","parts":[{"text":"hi"}]}]}`
 
 func TestGeminiForwardNative_CachedContentNotFoundPassthroughWithoutAccountPenalty(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	for _, tc := range []struct {
 		name   string
 		action string
@@ -81,7 +79,6 @@ func TestGeminiForwardNative_CachedContentNotFoundPassthroughWithoutAccountPenal
 }
 
 func TestGeminiForwardNative_CachedContentNotFoundBypassesTempUnschedulableRules(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	svc, _, repo := newGeminiCachedContentTestService(http.StatusForbidden, geminiCachedContentNotFoundBody)
 	c, rec := newGeminiNativeTestContext(t)
 	account := geminiDefaultPolicyAPIKeyAccount()
@@ -107,7 +104,6 @@ func TestGeminiForwardNative_CachedContentNotFoundBypassesTempUnschedulableRules
 }
 
 func TestGeminiForwardNative_OtherForbiddenStillPenalizesAccount(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	body := `{"error":{"code":403,"message":"Your project has been denied access. Please contact support.","status":"PERMISSION_DENIED"}}`
 	svc, _, repo := newGeminiCachedContentTestService(http.StatusForbidden, body)
 	c, _ := newGeminiNativeTestContext(t)
@@ -144,7 +140,6 @@ func TestIsGeminiCachedContentNotFound(t *testing.T) {
 }
 
 func TestGeminiForwardNative_VertexCachedContentNotFoundReturnsStandardForbidden(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	for _, tc := range []struct {
 		name   string
 		status int

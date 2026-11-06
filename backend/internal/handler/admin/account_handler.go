@@ -24,6 +24,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/geminicli"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/lifecycle"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
@@ -2081,6 +2082,9 @@ func (h *AccountHandler) BatchRefresh(c *gin.Context) {
 
 // BatchCreate handles batch creating accounts
 // POST /api/v1/admin/accounts/batch
+// adminPrivacyTaskTimeout 是批量创建/导入后异步设置隐私时单个账号的超时上限（L-4）。
+const adminPrivacyTaskTimeout = 60 * time.Second
+
 func (h *AccountHandler) BatchCreate(c *gin.Context) {
 	var req struct {
 		Accounts []CreateAccountRequest `json:"accounts" binding:"required,min=1"`
@@ -2184,6 +2188,7 @@ func (h *AccountHandler) BatchCreate(c *gin.Context) {
 
 		// 异步设置隐私，避免批量创建时阻塞请求
 		adminSvc := h.adminService
+		reqCtx := ctx
 		if len(antigravityPrivacyAccounts) > 0 {
 			accounts := antigravityPrivacyAccounts
 			go func() {
@@ -2192,9 +2197,13 @@ func (h *AccountHandler) BatchCreate(c *gin.Context) {
 						slog.Error("batch_create_antigravity_privacy_panic", "recover", r)
 					}
 				}()
-				bgCtx := context.Background()
 				for _, acc := range accounts {
-					adminSvc.ForceAntigravityPrivacy(bgCtx, acc)
+					taskCtx, cancel := lifecycle.Detached(reqCtx, adminPrivacyTaskTimeout)
+					adminSvc.ForceAntigravityPrivacy(taskCtx, acc)
+					cancel()
+					if lifecycle.Context().Err() != nil {
+						return
+					}
 				}
 			}()
 		}
@@ -2206,9 +2215,13 @@ func (h *AccountHandler) BatchCreate(c *gin.Context) {
 						slog.Error("batch_create_openai_privacy_panic", "recover", r)
 					}
 				}()
-				bgCtx := context.Background()
 				for _, acc := range accounts {
-					adminSvc.ForceOpenAIPrivacy(bgCtx, acc)
+					taskCtx, cancel := lifecycle.Detached(reqCtx, adminPrivacyTaskTimeout)
+					adminSvc.ForceOpenAIPrivacy(taskCtx, acc)
+					cancel()
+					if lifecycle.Context().Err() != nil {
+						return
+					}
 				}
 			}()
 		}

@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"time"
 
 	"github.com/pquerna/otp"
@@ -261,19 +262,26 @@ func (s *TotpService) CompleteSetup(ctx context.Context, userID int64, totpCode,
 		return ErrTotpSetupExpired
 	}
 
+	// T-1：绑定校验同样接入次数限制（与登录 2FA / step-up 共用按用户计数的窗口，
+	// D10a：保持按用户，不按 IP）。先占用一次尝试再校验；占满后即使正确码也被拒。
+	// 计数存储不可用时 fail-closed。
+	allowed, err := s.cache.ReserveVerifyAttempt(ctx, userID, maxTotpAttempts)
+	if err != nil {
+		slog.Warn("totp_complete_setup_reserve_attempt_failed", "user_id", userID, "error", err)
+		return ErrServiceUnavailable
+	}
+	if !allowed {
+		return s.tooManyAttemptsError(ctx, userID)
+	}
+
 	// Verify the TOTP code
 	if !totp.Validate(totpCode, session.Secret) {
 		return ErrTotpInvalidCode
 	}
 
-	setupSecretPrefix := "N/A"
-	if len(session.Secret) >= 4 {
-		setupSecretPrefix = session.Secret[:4]
-	}
 	slog.Debug("totp_complete_setup_before_encrypt",
 		"user_id", userID,
-		"secret_len", len(session.Secret),
-		"secret_prefix", setupSecretPrefix)
+		"secret_len", len(session.Secret))
 
 	// Encrypt the secret
 	encryptedSecret, err := s.encryptor.Encrypt(session.Secret)
@@ -292,16 +300,11 @@ func (s *TotpService) CompleteSetup(ctx context.Context, userID int64, totpCode,
 			"user_id", userID,
 			"error", decErr)
 	} else {
-		decryptedPrefix := "N/A"
-		if len(decrypted) >= 4 {
-			decryptedPrefix = decrypted[:4]
-		}
 		slog.Debug("totp_complete_setup_verified",
 			"user_id", userID,
 			"original_len", len(session.Secret),
 			"decrypted_len", len(decrypted),
-			"match", session.Secret == decrypted,
-			"decrypted_prefix", decryptedPrefix)
+			"match", session.Secret == decrypted)
 	}
 
 	// Update user with encrypted TOTP secret
@@ -316,6 +319,7 @@ func (s *TotpService) CompleteSetup(ctx context.Context, userID int64, totpCode,
 
 	// Clean up the setup session
 	_ = s.cache.DeleteSetupSession(ctx, userID)
+	_ = s.cache.ClearVerifyAttempts(ctx, userID)
 
 	return nil
 }
@@ -360,7 +364,7 @@ func (s *TotpService) VerifyCode(ctx context.Context, userID int64, code string)
 		return ErrServiceUnavailable
 	}
 	if !allowed {
-		return ErrTotpTooManyAttempts
+		return s.tooManyAttemptsError(ctx, userID)
 	}
 
 	// Get user
@@ -393,14 +397,9 @@ func (s *TotpService) VerifyCode(ctx context.Context, userID int64, code string)
 		return infraerrors.InternalServer("TOTP_VERIFY_ERROR", "failed to verify totp code")
 	}
 
-	secretPrefix := "N/A"
-	if len(secret) >= 4 {
-		secretPrefix = secret[:4]
-	}
 	slog.Debug("totp_verify_decrypted",
 		"user_id", userID,
-		"secret_len", len(secret),
-		"secret_prefix", secretPrefix)
+		"secret_len", len(secret))
 
 	// Verify the code (same parameters as totp.Validate) and learn which time step matched.
 	now := time.Now().UTC()
@@ -409,7 +408,6 @@ func (s *TotpService) VerifyCode(ctx context.Context, userID int64, code string)
 		"user_id", userID,
 		"valid", valid,
 		"secret_len", len(secret),
-		"secret_prefix", secretPrefix,
 		"server_time", now.Format(time.RFC3339))
 
 	if !valid {
@@ -613,4 +611,42 @@ func (s *TotpService) SendVerifyCode(ctx context.Context, userID int64, locale .
 
 	// Send verification code via queue
 	return s.emailQueueService.EnqueueVerifyCode(user.Email, siteName, firstEmailLocale(locale))
+}
+
+// TotpAttemptTTLReader 是 TotpCache 的可选扩展：返回按用户尝试计数窗口的剩余时间。
+// 返回 0 表示未知（键不存在或无过期时间）。
+type TotpAttemptTTLReader interface {
+	GetVerifyAttemptsTTL(ctx context.Context, userID int64) (time.Duration, error)
+}
+
+// TotpRetryAfterMetadataKey 是 429 TOTP_TOO_MANY_ATTEMPTS 错误 metadata 中的剩余秒数，
+// response.ErrorFrom 会据此写 Retry-After 响应头（BD2-4）。
+const TotpRetryAfterMetadataKey = "retry_after"
+
+// tooManyAttemptsError 返回带剩余锁定秒数的 ErrTotpTooManyAttempts（BD2-4）。
+// 剩余 TTL 不可得时回退为整个窗口长度。
+func (s *TotpService) tooManyAttemptsError(ctx context.Context, userID int64) error {
+	return ErrTotpTooManyAttempts.WithMetadata(map[string]string{
+		TotpRetryAfterMetadataKey: strconv.Itoa(totpRetryAfterSeconds(ctx, s.cache, userID)),
+	})
+}
+
+func totpRetryAfterSeconds(ctx context.Context, cache TotpCache, userID int64) int {
+	fallback := int(totpAttemptsTTL / time.Second)
+	reader, ok := cache.(TotpAttemptTTLReader)
+	if !ok {
+		return fallback
+	}
+	ttl, err := reader.GetVerifyAttemptsTTL(ctx, userID)
+	if err != nil || ttl <= 0 {
+		return fallback
+	}
+	secs := int((ttl + time.Second - 1) / time.Second)
+	if secs < 1 {
+		secs = 1
+	}
+	if secs > fallback {
+		secs = fallback
+	}
+	return secs
 }

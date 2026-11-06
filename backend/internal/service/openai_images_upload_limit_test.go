@@ -28,7 +28,6 @@ func buildImagesEditMultipartBody(t *testing.T, imageSize int) ([]byte, string, 
 
 func parseImagesEditMultipart(t *testing.T, body []byte, contentType string) (*OpenAIImagesRequest, error) {
 	t.Helper()
-	gin.SetMode(gin.TestMode)
 	req := httptest.NewRequest(http.MethodPost, "/v1/images/edits", bytes.NewReader(body))
 	req.Header.Set("Content-Type", contentType)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())

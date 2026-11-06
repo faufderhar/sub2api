@@ -364,7 +364,7 @@ func TestImageDownloadTransportRejectsNonPublicHosts(t *testing.T) {
 
 func TestImageDownloadTransportRoutesPublicHosts(t *testing.T) {
 	transport, directCalls, proxiedCalls := newCountingImageDownloadTransport(nil)
-	req, err := http.NewRequest(http.MethodGet, "https://203.0.113.10/a.png", nil)
+	req, err := http.NewRequest(http.MethodGet, "https://93.184.215.14/a.png", nil)
 	require.NoError(t, err)
 	resp, err := transport.RoundTrip(req)
 	require.NoError(t, err)
@@ -373,7 +373,7 @@ func TestImageDownloadTransportRoutesPublicHosts(t *testing.T) {
 	require.Zero(t, proxiedCalls.Load())
 
 	transport, directCalls, proxiedCalls = newCountingImageDownloadTransport(&url.URL{Scheme: "http", Host: "127.0.0.1:7890"})
-	req, err = http.NewRequest(http.MethodGet, "https://203.0.113.10/a.png", nil)
+	req, err = http.NewRequest(http.MethodGet, "https://93.184.215.14/a.png", nil)
 	require.NoError(t, err)
 	resp, err = transport.RoundTrip(req)
 	require.NoError(t, err)

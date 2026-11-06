@@ -18,8 +18,12 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
+// DefaultMaxRequestBytes 是 MCP 传输层 JSON-RPC 请求体的默认上限（T-3/D11a：16MB），
+// 可通过 server.mcp_max_request_body_size 覆盖。
+const DefaultMaxRequestBytes int64 = maxRequestBytes
+
 const (
-	maxRequestBytes = 1 << 20
+	maxRequestBytes = 16 << 20
 	maxResultBytes  = 2 << 20
 	toolTimeout     = 30 * time.Second
 )
@@ -29,6 +33,14 @@ const (
 // allowedOrigins must match the list given to Authenticate so the SDK's
 // cross-origin check accepts the same browser origins.
 func NewHandler(dispatcher http.Handler, allowedOrigins []string) http.Handler {
+	return NewHandlerWithLimit(dispatcher, allowedOrigins, DefaultMaxRequestBytes)
+}
+
+// NewHandlerWithLimit 与 NewHandler 相同，但使用指定的请求体上限；maxBodyBytes<=0 时取默认值。
+func NewHandlerWithLimit(dispatcher http.Handler, allowedOrigins []string, maxBodyBytes int64) http.Handler {
+	if maxBodyBytes <= 0 {
+		maxBodyBytes = DefaultMaxRequestBytes
+	}
 	servers := map[string]*mcp.Server{}
 	for _, scope := range []string{service.MCPScopeUser, service.MCPScopeAdmin} {
 		for _, readOnly := range []bool{true, false} {
@@ -68,7 +80,7 @@ func NewHandler(dispatcher http.Handler, allowedOrigins []string) http.Handler {
 			return
 		}
 		// Bound the JSON-RPC envelope before the SDK allocates for it.
-		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxRequestBytes))
+		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBodyBytes))
 		if err != nil {
 			http.Error(w, "MCP request body exceeds the limit or cannot be read", http.StatusRequestEntityTooLarge)
 			return

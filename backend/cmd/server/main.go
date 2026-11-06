@@ -18,6 +18,7 @@ import (
 	_ "github.com/Wei-Shaw/sub2api/ent/runtime"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/handler"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/lifecycle"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/setup"
@@ -106,7 +107,9 @@ func runSetupServer() {
 	}))
 
 	// Register setup routes
-	setup.RegisterRoutes(r)
+	if err := setup.RegisterRoutes(r); err != nil {
+		log.Fatalf("Failed to initialize setup wizard: %v", err)
+	}
 
 	// Serve embedded frontend if available
 	if web.HasEmbeddedFrontend() {
@@ -188,6 +191,7 @@ func runMainServer() {
 	<-quit
 
 	log.Println("Shutting down server...")
+	lifecycle.Shutdown() // L-4: 通知脱离请求的后台任务停止
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

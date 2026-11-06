@@ -330,7 +330,6 @@ func TestCheckErrorPolicy_401FollowsTempUnschedScope(t *testing.T) {
 
 // 计数入口把实际发往上游的模型交给错误处理：显式模型级 401 规则只冷却该模型，不把整号置为 error。
 func TestCountTokensEntries_ExplicitModelScope401OnlyCoolsModel(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	unauthorized := func() *http.Response {
 		return &http.Response{
 			StatusCode: http.StatusUnauthorized,
@@ -430,7 +429,6 @@ func TestCountTokensEntries_ExplicitModelScope401OnlyCoolsModel(t *testing.T) {
 
 // Bedrock 故障转移入口与重试耗尽入口把实际发往上游的模型交给错误处理：显式模型级规则只冷却该模型。
 func TestAnthropicFailoverEntries_ExplicitModelScopeOnlyCoolsModel(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	cfg := &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}
 	newResponse := func(status int, body string) *http.Response {
 		return &http.Response{

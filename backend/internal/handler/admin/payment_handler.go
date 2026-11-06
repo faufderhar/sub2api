@@ -6,6 +6,7 @@ import (
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
+	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -15,6 +16,15 @@ import (
 type PaymentHandler struct {
 	paymentService *service.PaymentService
 	configService  *service.PaymentConfigService
+	// step-up 依赖（M-7）：支付配置/服务商实例「实际变更」时门控。
+	totpService *service.TotpService
+	userService *service.UserService
+}
+
+// SetStepUpDeps attaches the services backing the conditional payment step-up gate.
+func (h *PaymentHandler) SetStepUpDeps(totpService *service.TotpService, userService *service.UserService) {
+	h.totpService = totpService
+	h.userService = userService
 }
 
 // NewPaymentHandler creates a new admin PaymentHandler.
@@ -426,7 +436,13 @@ func (h *PaymentHandler) CreateProvider(c *gin.Context) {
 		return
 	}
 	h.paymentService.RefreshProviders(c.Request.Context())
-	response.Created(c, inst)
+	// BD2-2：与 GET 列表同形——config 为对象且隐藏敏感字段，绝不回显原始 config。
+	resp, err := h.configService.ProviderInstanceToResponse(inst)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Created(c, resp)
 }
 
 // UpdateProvider updates an existing payment provider instance.
@@ -441,13 +457,25 @@ func (h *PaymentHandler) UpdateProvider(c *gin.Context) {
 		response.BadRequest(c, "Invalid request: "+err.Error())
 		return
 	}
+	// M-7：服务商实例更新仅在字段实际变化时要求 step-up；比较失败按已变更处理（fail-closed）。
+	if changed, err := h.configService.ProviderInstanceUpdateChanges(c.Request.Context(), id, req); err != nil || changed {
+		if !middleware.EnforceStepUpAlways(c, h.totpService, h.userService) {
+			return
+		}
+	}
 	inst, err := h.configService.UpdateProviderInstance(c.Request.Context(), id, req)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
 	h.paymentService.RefreshProviders(c.Request.Context())
-	response.Success(c, inst)
+	// BD2-2：更新响应同样使用脱敏后的列表形状。
+	resp, err := h.configService.ProviderInstanceToResponse(inst)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, resp)
 }
 
 // DeleteProvider deletes a payment provider instance.
@@ -496,6 +524,12 @@ func (h *PaymentHandler) UpdateConfig(c *gin.Context) {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
 		return
+	}
+	// M-7：仅当提交的字段与存储值不同才要求 step-up（必须在写入之前）。
+	if h.paymentConfigRequestChanged(c.Request.Context(), req) {
+		if !middleware.EnforceStepUpAlways(c, h.totpService, h.userService) {
+			return
+		}
 	}
 	if err := h.configService.UpdatePaymentConfig(c.Request.Context(), req); err != nil {
 		response.ErrorFrom(c, err)

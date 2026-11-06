@@ -29,10 +29,45 @@ terminate healthy long generations and streams.
   `POST /api/v1/admin/plugins/upload`, `PUT /api/v1/admin/plugins/:id/config`.
   If your reverse proxy sets `client_max_body_size`, keep it at least as large
   as what these endpoints need (or scope a larger value to these paths only).
+- `server.mcp_max_request_body_size: 16777216` (T-3) caps the MCP transport
+  route `POST /api/v1/mcp` separately from the 1 MiB default (0 = 16 MiB; it
+  may not exceed `server.max_request_body_size`). The body is streamed and uses
+  `server.api_large_body_read_timeout`.
 - `gateway.max_body_size: 268435456` remains available to multimodal, Gemini,
   image, video, and batch-image endpoints.
 - `gateway.text_max_body_size: 33554432` limits the known pure-text
   `/embeddings` and `/alpha/search` endpoints to 32 MiB.
+- `gateway.request_body_read_timeout: 0` (T-4, seconds, default off) can bound
+  how long reading a **gateway** request body may take. It only covers the
+  body: the connection read deadline is cleared as soon as the body has been
+  read (EOF or the full `Content-Length`) and again when the handler returns,
+  so long SSE/streaming responses are never cut off. A body still arriving
+  after the timeout fails the read; the gateway answers 400
+  `Failed to read request body` with `Connection: close`. WebSocket upgrades
+  and requests without a body are not affected. Prefer the edge timeouts below
+  (they stop slow bodies before they reach Go); enable this only as a second
+  layer, with a value well above your slowest legitimate upload (for example
+  `60`-`300` seconds for large multimodal requests).
+- Grok voice requests are read at most 64 MiB (413 above that, M-6), and the
+  in-memory S3 backup `Upload` path is capped at 1 GiB (real backups stream via
+  `UploadFile`, unaffected).
+
+### Edge timeouts for slow request bodies (T-4)
+
+Sub2API deliberately has no response `WriteTimeout`. Slow-body protection for
+gateway routes belongs at the edge:
+
+| Edge | Setting | Suggested |
+|------|---------|-----------|
+| Nginx | `client_header_timeout` | `10s` |
+| Nginx | `client_body_timeout` (time between two successive body reads, not the whole body) | `60s` |
+| Nginx | `proxy_request_buffering off` + `proxy_read_timeout`/`proxy_send_timeout` (long SSE) | `1800s` |
+| Caddy | `servers { timeouts { read_header 10s; read_body 5m } }` (`read_body` is a total limit) | size to your largest upload |
+| CDN/WAF | request/body timeouts, max body size | per provider |
+
+Do **not** set an edge or application timeout that covers the whole response
+(e.g. Caddy `timeouts write`, Nginx `send_timeout` far below your longest
+stream): it would terminate healthy long generations.
 - H2C defaults to 50 concurrent streams per connection, a 2 MiB connection
   upload window, and a 512 KiB stream upload window.
 - Invalid credential abuse is limited in process by trusted client IP (IPv6
@@ -67,6 +102,16 @@ and payment requests all use that result.
   `X-Real-IP`, then the leftmost public `X-Forwarded-For` value. Requests from
   untrusted peers never use forwarded headers, even with the switch on. Only
   enable it when the edge overwrites (not appends) those headers.
+* **Single-value headers from trusted proxies** (T-5,
+  `security.honor_forwarded_client_ip_headers_from_trusted_proxies`, env
+  `SECURITY_HONOR_FORWARDED_CLIENT_IP_HEADERS_FROM_TRUSTED_PROXIES`, default
+  `false`). With the legacy switch off, setting this to `true` lets the headers
+  listed in `security.forwarded_client_ip_headers` (for example
+  `CF-Connecting-IP`) win over the XFF chain, but only when the direct peer is
+  in `server.trusted_proxies` and the header is a single line holding exactly
+  one valid IP; anything else falls back to the XFF walk. Startup warns when
+  it is enabled while `server.trusted_proxies` is empty (it then has no
+  effect). Enable it only when the trusted edge overwrites that header.
 
 Configure with YAML or the comma-separated environment variable
 `SERVER_TRUSTED_PROXIES` (an empty value overrides YAML and trusts nothing).
@@ -187,6 +232,50 @@ inside it no longer resets the budget. Several users behind the same /64 share
 one counter. Audit logs, access logs, session binding and API-key IP
 allow/deny lists still see the full address returned by `ip.ClientIP`.
 
+## TOTP attempt limits (T-1 / T-2 / BD2-4)
+
+TOTP verification (login 2FA, step-up, and TOTP setup completion) shares one
+attempt counter **per user** (not per IP, by design: D10a). After the cap the
+API returns 429 `TOTP_TOO_MANY_ATTEMPTS` even for a correct code, with a
+`Retry-After` header in seconds (the remaining lockout TTL, capped at and
+falling back to 900). Completing TOTP setup reserves an attempt before checking
+the code. If the counter store (Redis) is unavailable, verification fails
+closed.
+
+## Outbound requests and private addresses (M-3)
+
+`security.url_allowlist.allow_private_hosts` keeps its default `true`. When it is
+set to `false`:
+
+- URLs are checked when configured (as before), **and** the IP actually dialed
+  is checked at connect time for direct connections (`net.Dialer.Control`), so
+  DNS rebinding and redirects to internal addresses are blocked too.
+- Blocked: loopback, private (RFC 1918, ULA `fc00::/7`), link-local,
+  multicast, unspecified, and the reserved ranges `0.0.0.0/8`,
+  `100.64.0.0/10` (CGNAT), `192.0.0.0/24`, `192.0.2.0/24`, `198.18.0.0/15`,
+  `198.51.100.0/24`, `203.0.113.0/24`, `240.0.0.0/4`, `100::/64`,
+  `2001:db8::/32`, `64:ff9b:1::/48`, `fec0::/10`. IPv4-mapped IPv6 is
+  normalized before the check.
+- Connections through a configured HTTP/SOCKS proxy are not dial-checked (the
+  proxy itself may legitimately be on a private address); the URL check still
+  applies.
+- Upstream requests that must only reach public hosts (for example image URL
+  downloads for b64 backfill on the HTTP upstream client) are dial-checked even
+  when `allow_private_hosts` is `true`.
+
+## Redis failure policy (L-7)
+
+`concurrency.redis_failure_policy` (env `CONCURRENCY_REDIS_FAILURE_POLICY`):
+
+- `fail_open` (default, previous behavior): when Redis cannot be reached the
+  concurrency wait queue and RPM limit let the request through.
+- `fail_close`: the wait queue counts as full (HTTP 429) and the RPM check
+  returns 503 `BILLING_SERVICE_ERROR`. Per-API-key slot tracking stays
+  fail-open either way.
+
+Choose `fail_close` if over-admission during a Redis outage is worse for you
+than rejecting traffic; monitor Redis availability either way.
+
 ## Nginx baseline
 
 Define shared zones in the `http` block. Tune rates to measured legitimate
@@ -207,6 +296,7 @@ server {
     server_name api.example.com;
 
     client_header_timeout 10s;
+    client_body_timeout 60s;
     client_max_body_size 256m;
     large_client_header_buffers 4 16k;
     limit_conn sub2api_conn 40;
@@ -319,3 +409,19 @@ cannot absorb volumetric attacks, TLS floods, bandwidth saturation, or a large
 distributed source set. Those require upstream network capacity, CDN/WAF
 filtering, provider firewall rules, and origin isolation. Avoid high-cardinality
 metrics or per-request database security logs during rejection storms.
+
+## Setup wizard token / 安装向导 token
+
+While the instance is not installed, the setup wizard prints a one-time token at startup:
+
+```
+[setup] Setup token: 0123456789abcdef0123456789abcdef
+```
+
+- `POST /setup/test-db`, `/setup/test-redis` and `/setup/install` require header `X-Setup-Token: <token>` (whitespace trimmed, constant-time compare).
+- Missing → 401 `SETUP_TOKEN_REQUIRED`; wrong → 403 `SETUP_TOKEN_INVALID`; 10 wrong attempts per direct client IP within 15 minutes → 429 `SETUP_TOKEN_RATE_LIMITED` with `Retry-After`.
+- The rate-limit key is the TCP peer address; `X-Forwarded-For` is ignored for this check.
+- `GET /setup/status` stays public and returns `setup_token_required: true`.
+- The token is regenerated on each restart and is not persisted. `AUTO_SETUP` (Docker env-based install) does not use the HTTP wizard and is unaffected.
+- After installation all `/setup/*` write routes (including `/setup/install`) return 404 (BD2-3).
+- Database passwords may contain spaces, quotes or backslashes, and may be empty: the DSN quotes/escapes values when needed and omits an empty password (SETUP-DSN).

@@ -43,10 +43,12 @@ func (s *SettingService) UpdateSettingsOmitting(ctx context.Context, settings *S
 		return err
 	}
 	omitted.dropFrom(updates)
+	s.addForwardedIPMigrationMarker(updates)
 
 	if err := s.settingRepo.SetMultiple(ctx, updates); err != nil {
 		return err
 	}
+	s.clearForwardedIPMigrationPending(updates)
 	s.refreshCachedSettingsAfterWrite(ctx, settings, omitted)
 	return nil
 }
@@ -73,10 +75,12 @@ func (s *SettingService) UpdateSettingsWithAuthSourceDefaultsOmitting(ctx contex
 		updates[key] = value
 	}
 	omitted.dropFrom(updates)
+	s.addForwardedIPMigrationMarker(updates)
 
 	if err := s.settingRepo.SetMultiple(ctx, updates); err != nil {
 		return err
 	}
+	s.clearForwardedIPMigrationPending(updates)
 	s.refreshCachedSettingsAfterWrite(ctx, settings, omitted)
 	return nil
 }
@@ -856,4 +860,25 @@ func (s *SettingService) validateDefaultSubscriptionGroups(ctx context.Context, 
 	}
 
 	return nil
+}
+
+// clearForwardedIPMigrationPending（BD-7）：迁移标记随本次保存成功写入后，DB 与运行时一致，清除挂起状态。
+func (s *SettingService) clearForwardedIPMigrationPending(updates map[string]string) {
+	if _, ok := updates[settingKeyForwardedIPTrustResetV3]; ok {
+		s.forwardedIPMigrationPending.Store(false)
+	}
+}
+
+// addForwardedIPMigrationMarker（BD-7）：迁移挂起且本次保存确实写入 api_key_acl_trust_forwarded_ip 时，
+// 写入的值即管理员在设置页确认后的值（GET 已返回运行时值），一并补写迁移标记，避免之后再次重置。
+// 该键被省略（部分保存）时不补写，DB 旧值仍待迁移。
+func (s *SettingService) addForwardedIPMigrationMarker(updates map[string]string) {
+	if !s.forwardedIPMigrationPending.Load() {
+		return
+	}
+	if _, ok := updates[SettingKeyAPIKeyACLTrustForwardedIP]; !ok {
+		return
+	}
+	updates[settingKeyForwardedIPTrustResetV3] = "true"
+	updates[settingKeyForwardedClientIPModeV2] = "true"
 }

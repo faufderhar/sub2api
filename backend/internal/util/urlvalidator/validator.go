@@ -117,8 +117,7 @@ func ValidateResolvedIP(host string) error {
 	}
 
 	for _, ip := range ips {
-		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
-			ip.IsLinkLocalMulticast() || ip.IsUnspecified() {
+		if IsDisallowedIP(ip) {
 			return fmt.Errorf("resolved ip %s is not allowed", ip.String())
 		}
 	}
@@ -162,7 +161,7 @@ func isAllowedHost(host string, allowlist []string) bool {
 	return false
 }
 
-// IsBlockedHost 报告 host 是否为 localhost、*.localhost，或回环、私网、链路本地、未指定地址的字面量 IP。
+// IsBlockedHost 报告 host 是否为 localhost、*.localhost，或 IsDisallowedIP 禁止的字面量 IP（含 M-3 补充的保留网段）。
 // 只判断字面量，域名的解析结果由 ValidateResolvedIP 校验。
 func IsBlockedHost(host string) bool {
 	return isBlockedHost(strings.ToLower(strings.TrimSpace(host)))
@@ -173,7 +172,7 @@ func isBlockedHost(host string) bool {
 		return true
 	}
 	if ip := net.ParseIP(host); ip != nil {
-		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() {
+		if IsDisallowedIP(ip) {
 			return true
 		}
 	}

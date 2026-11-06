@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/safego"
 )
 
 // cnQuotaProber 抽象额度探测（*CNProviderQuotaService 实现，测试可替换）。
@@ -72,6 +73,7 @@ func (s *CNProviderBalanceCheckService) Start() {
 	log.Printf("[CNBalance] started (interval=%s threshold=%.2f)", s.interval, s.cfg.Gateway.CNProviders.BalanceThreshold)
 	s.wg.Add(1)
 	go func() {
+		defer safego.Recover("scheduler.cn_provider_balance_check")
 		defer s.wg.Done()
 		ticker := time.NewTicker(s.interval)
 		defer ticker.Stop()
@@ -80,7 +82,7 @@ func (s *CNProviderBalanceCheckService) Start() {
 		for {
 			select {
 			case <-ticker.C:
-				s.runOnce()
+				safego.Tick("scheduler.cn_provider_balance_check", s.runOnce)
 			case <-s.stopCh:
 				return
 			}

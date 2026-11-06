@@ -19,8 +19,23 @@ import (
 // installMutex prevents concurrent installation attempts (TOCTOU protection)
 var installMutex sync.Mutex
 
-// RegisterRoutes registers setup wizard routes
-func RegisterRoutes(r *gin.Engine) {
+// RegisterRoutes registers setup wizard routes.
+//
+// L-8：每次调用（即每次进程启动安装向导）都会生成新的 setup token 并打印到启动日志；
+// 修改类接口必须携带 X-Setup-Token。token 生成失败时返回错误（fail-closed，不启动向导）。
+func RegisterRoutes(r *gin.Engine) error {
+	token, err := GenerateSetupToken()
+	if err != nil {
+		return err
+	}
+	RegisterRoutesWithToken(r, token)
+	logSetupToken(token)
+	return nil
+}
+
+// RegisterRoutesWithToken registers setup routes guarded by the given setup token.
+func RegisterRoutesWithToken(r *gin.Engine, token string) {
+	tokenGuard := newSetupTokenGuard(token)
 	setup := r.Group("/setup")
 	{
 		// Status endpoint is always accessible (read-only)
@@ -29,6 +44,7 @@ func RegisterRoutes(r *gin.Engine) {
 		// All modification endpoints are protected by setupGuard
 		protected := setup.Group("")
 		protected.Use(setupGuard())
+		protected.Use(tokenGuard.middleware())
 		{
 			protected.POST("/test-db", testDatabase)
 			protected.POST("/test-redis", testRedis)
@@ -41,13 +57,16 @@ func RegisterRoutes(r *gin.Engine) {
 type SetupStatus struct {
 	NeedsSetup bool   `json:"needs_setup"`
 	Step       string `json:"step"`
+	// SetupTokenRequired 告知前端修改类接口需要 X-Setup-Token（L-8，始终为 true）。
+	SetupTokenRequired bool `json:"setup_token_required"`
 }
 
 // getStatus returns the current setup status
 func getStatus(c *gin.Context) {
 	response.Success(c, SetupStatus{
-		NeedsSetup: NeedsSetup(),
-		Step:       "welcome",
+		NeedsSetup:         NeedsSetup(),
+		Step:               "welcome",
+		SetupTokenRequired: true,
 	})
 }
 

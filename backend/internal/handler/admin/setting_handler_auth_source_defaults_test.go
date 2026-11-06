@@ -215,6 +215,8 @@ func TestSettingHandler_UpdateSettings_PersistsPaymentVisibleMethodsAndAdvancedS
 	}
 	svc := service.NewSettingService(repo, &config.Config{Default: config.DefaultConfig{UserConcurrency: 5}})
 	handler := NewSettingHandler(svc, nil, nil, nil, nil, nil, nil)
+	// M-7：修改支付可见方式需要 step-up；此处注入已验证的管理员会话。
+	grantStepUpForTest(handler, svc, repo)
 
 	body := map[string]any{
 		"promo_code_enabled":                                      true,
@@ -233,6 +235,7 @@ func TestSettingHandler_UpdateSettings_PersistsPaymentVisibleMethodsAndAdvancedS
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings", bytes.NewReader(rawBody))
 	c.Request.Header.Set("Content-Type", "application/json")
+	asJWTAdmin(c)
 
 	handler.UpdateSettings(c)
 

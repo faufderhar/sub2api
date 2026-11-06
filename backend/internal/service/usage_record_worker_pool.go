@@ -10,6 +10,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/safego"
 	"github.com/alitto/pond/v2"
 	"go.uber.org/zap"
 )
@@ -233,6 +234,7 @@ func (p *UsageRecordWorkerPool) startAutoScaler() {
 
 	p.lifecycleWg.Add(1)
 	go func() {
+		defer safego.Recover("scheduler.usage_record_autoscale")
 		defer p.lifecycleWg.Done()
 
 		ticker := time.NewTicker(p.autoScaleInterval)
@@ -243,7 +245,7 @@ func (p *UsageRecordWorkerPool) startAutoScaler() {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				p.autoScaleTick()
+				safego.Tick("scheduler.usage_record_autoscale", p.autoScaleTick)
 			}
 		}
 	}()

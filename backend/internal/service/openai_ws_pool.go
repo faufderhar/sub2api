@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/safego"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -939,10 +940,12 @@ func (p *openAIWSConnPool) startBackgroundWorkers() {
 	}
 	p.workerWg.Add(2)
 	go func() {
+		defer safego.Recover("scheduler.openai_ws_pool_ping")
 		defer p.workerWg.Done()
 		p.runBackgroundPingWorker()
 	}()
 	go func() {
+		defer safego.Recover("scheduler.openai_ws_pool_cleanup")
 		defer p.workerWg.Done()
 		p.runBackgroundCleanupWorker()
 	}()

@@ -51,7 +51,7 @@ func TestMCPToolCatalogTargetsRegisteredManagementRoutes(t *testing.T) {
 	// duplicate Gin paths or panic while building its permission-filtered servers.
 	mcpRouter := gin.New()
 	require.NotPanics(t, func() {
-		RegisterMCPRoutes(mcpRouter.Group("/api/v1"), h, middleware.AuditLogMiddleware(mcpRouteNext), middleware.StepUpAuthMiddleware(mcpRouteNext), nil, nil, nil, nil)
+		RegisterMCPRoutes(mcpRouter.Group("/api/v1"), h, middleware.AuditLogMiddleware(mcpRouteNext), middleware.StepUpAuthMiddleware(mcpRouteNext), nil, nil, nil, nil, 0)
 	})
 	for _, method := range []string{http.MethodGet, http.MethodPost, http.MethodDelete} {
 		w := httptest.NewRecorder()

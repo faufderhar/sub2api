@@ -81,7 +81,6 @@ func upstreamErrorEventsFromContext(t *testing.T, c *gin.Context) []*OpsUpstream
 }
 
 func TestGeminiForwardNative_StreamProhibitedContentMarksInBandErrorAndKeepsBillingUsage(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	svc := newGeminiSignalService("text/event-stream; charset=utf-8", geminiSignalTestProhibitedSSE)
 	c, rec := newGeminiNativeTestContext(t)
 
@@ -117,7 +116,6 @@ func TestGeminiForwardNative_StreamProhibitedContentMarksInBandErrorAndKeepsBill
 }
 
 func TestGeminiForwardNative_StreamErrorEnvelopeMarksUpstreamFailure(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	body := `data: {"candidates":[{"content":{"parts":[{"text":"partial"}],"role":"model"}}],"usageMetadata":{"candidatesTokenCount":2,"promptTokenCount":10,"totalTokenCount":12}}
 
 data: {"error":{"code":429,"message":"Resource has been exhausted (e.g. check quota).","status":"RESOURCE_EXHAUSTED"}}
@@ -158,7 +156,6 @@ data: {"error":{"code":429,"message":"Resource has been exhausted (e.g. check qu
 }
 
 func TestGeminiForwardNative_StreamPromptBlockedMarksContentPolicy(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	body := `data: {"promptFeedback":{"blockReason":"SAFETY","safetyRatings":[{"category":"HARM_CATEGORY_HARASSMENT","probability":"HIGH","blocked":true}]},"usageMetadata":{"promptTokenCount":10,"totalTokenCount":10}}
 
 `
@@ -183,7 +180,6 @@ func TestGeminiForwardNative_StreamPromptBlockedMarksContentPolicy(t *testing.T)
 // Vertex 拦截 prompt 时 usageMetadata 可能只带 cachedContentTokenCount、缺 promptTokenCount：
 // input 下限为 0，缓存命中照上游所报计入 cache_read。
 func TestGeminiForwardNative_StreamPromptBlockedWithOnlyCachedTokensKeepsInputNonNegative(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	body := `data: {"promptFeedback":{"blockReason":"PROHIBITED_CONTENT"},"usageMetadata":{"cachedContentTokenCount":12980,"totalTokenCount":0,"trafficType":"ON_DEMAND"},"modelVersion":"gemini-3.5-flash-lite"}
 
 `
@@ -204,7 +200,6 @@ func TestGeminiForwardNative_StreamPromptBlockedWithOnlyCachedTokensKeepsInputNo
 }
 
 func TestGeminiForwardNative_EmptyStreamMarksUpstreamFailure(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	svc := newGeminiSignalService("text/event-stream", "")
 	c, rec := newGeminiNativeTestContext(t)
 
@@ -230,7 +225,6 @@ func TestGeminiForwardNative_EmptyStreamMarksUpstreamFailure(t *testing.T) {
 }
 
 func TestGeminiForwardNative_NormalStreamLeavesNoMark(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	svc := newGeminiSignalService("text/event-stream", geminiSignalTestStopSSE)
 	c, rec := newGeminiNativeTestContext(t)
 
@@ -246,7 +240,6 @@ func TestGeminiForwardNative_NormalStreamLeavesNoMark(t *testing.T) {
 }
 
 func TestGeminiForwardNative_NonStreamProhibitedContentMarksInBandError(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	body := `{"candidates":[{"content":{},"finishMessage":"` + geminiSignalTestFinishMessage + `","finishReason":"PROHIBITED_CONTENT"}],"modelVersion":"gemini-3.7-flash","usageMetadata":{"candidatesTokenCount":120,"promptTokenCount":900,"thoughtsTokenCount":30,"totalTokenCount":1050}}`
 	svc := newGeminiSignalService("application/json", body)
 	c, rec := newGeminiNativeTestContext(t)
@@ -271,7 +264,6 @@ func TestGeminiForwardNative_NonStreamProhibitedContentMarksInBandError(t *testi
 }
 
 func TestGeminiForwardNative_NonStreamErrorEnvelopeOn200MarksUpstreamFailure(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	body := `{"error":{"code":500,"message":"Internal error encountered.","status":"INTERNAL"}}`
 	svc := newGeminiSignalService("application/json", body)
 	c, rec := newGeminiNativeTestContext(t)
@@ -297,7 +289,6 @@ func TestGeminiForwardNative_NonStreamErrorEnvelopeOn200MarksUpstreamFailure(t *
 }
 
 func TestGeminiForwardNative_StreamErrorEnvelopeAfterContentFilterWins(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	body := `data: {"candidates":[{"content":{},"finishReason":"SAFETY"}]}
 
 data: {"error":{"code":503,"message":"The model is overloaded. Please try again later.","status":"UNAVAILABLE"}}
@@ -321,7 +312,6 @@ data: {"error":{"code":503,"message":"The model is overloaded. Please try again 
 }
 
 func TestGeminiForwardNative_StreamNonSSEJSONBodyIsInspected(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	t.Run("json array with content filter", func(t *testing.T) {
 		body := `[{
   "candidates": [{"content": {"parts": [{"text": "hello"}], "role": "model"}}],
@@ -369,7 +359,6 @@ func TestGeminiForwardNative_StreamNonSSEJSONBodyIsInspected(t *testing.T) {
 }
 
 func TestGeminiForwardNative_StreamOversizedNonSSEBodyLeavesNoMark(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	filler := strings.Repeat("x", geminiSSEFallbackBodyLimit)
 	body := `{"candidates":[{"content":{"parts":[{"text":"` + filler + `"}],"role":"model"},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":1}}` + "\n"
 	svc := newGeminiSignalService("application/json", body)
@@ -383,7 +372,6 @@ func TestGeminiForwardNative_StreamOversizedNonSSEBodyLeavesNoMark(t *testing.T)
 }
 
 func TestGeminiForwardNative_StreamNonSSEEmptyBodyIsEmpty(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	for name, body := range map[string]string{
 		"empty object":     "{}\n",
 		"empty candidates": `{"candidates":[],"usageMetadata":{"promptTokenCount":3}}` + "\n",
@@ -406,7 +394,6 @@ func TestGeminiForwardNative_StreamNonSSEEmptyBodyIsEmpty(t *testing.T) {
 }
 
 func TestGeminiForwardNative_StreamWithoutDataEventsIsEmpty(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	for name, body := range map[string]string{
 		"keepalive comments only": ": keepalive\n\n: keepalive\n\n",
 		"done marker only":        "data: [DONE]\n\n",
@@ -430,7 +417,6 @@ func TestGeminiForwardNative_StreamWithoutDataEventsIsEmpty(t *testing.T) {
 }
 
 func TestGeminiForwardNative_StreamOtherFinishReasonLeavesNoMark(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	body := `data: {"candidates":[{"content":{"parts":[{"text":"full answer"}],"role":"model"},"finishReason":"OTHER"}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":2}}
 
 `
@@ -445,7 +431,6 @@ func TestGeminiForwardNative_StreamOtherFinishReasonLeavesNoMark(t *testing.T) {
 }
 
 func TestGeminiForwardNative_StreamMalformedFunctionCallLeavesNoMark(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	body := `data: {"candidates":[{"content":{"parts":[{"text":"partial"}],"role":"model"},"finishReason":"MALFORMED_FUNCTION_CALL"}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":2}}
 
 `
@@ -460,7 +445,6 @@ func TestGeminiForwardNative_StreamMalformedFunctionCallLeavesNoMark(t *testing.
 }
 
 func TestGeminiForwardNative_NonStreamEmptyBodyMarksEmptyResponse(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	for name, body := range map[string]string{
 		"blank":            "",
 		"empty object":     "{}",
@@ -488,7 +472,6 @@ func TestGeminiForwardNative_NonStreamEmptyBodyMarksEmptyResponse(t *testing.T) 
 }
 
 func TestGeminiForwardNative_CountTokensBodyLeavesNoMark(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	svc := newGeminiSignalService("application/json", `{"totalTokens":12}`)
 	c, rec := newGeminiNativeTestContext(t)
 	_, err := svc.ForwardNative(context.Background(), c, geminiSignalTestAccount(),

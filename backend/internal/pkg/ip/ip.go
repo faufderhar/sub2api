@@ -89,6 +89,15 @@ func SetTrustedProxies(entries []string) []string {
 	return invalid
 }
 
+// honorSingleValueHeaders（T-5）：新模式下是否对可信直连采用配置的单值头，默认 false。
+var honorSingleValueHeaders atomic.Bool
+
+// SetHonorForwardedClientIPHeadersFromTrustedProxies 设置 T-5 开关
+// （security.honor_forwarded_client_ip_headers_from_trusted_proxies）。
+func SetHonorForwardedClientIPHeadersFromTrustedProxies(enabled bool) {
+	honorSingleValueHeaders.Store(enabled)
+}
+
 // TrustedProxiesConfigured 报告当前是否配置了至少一个可信代理网段。
 func TrustedProxiesConfigured() bool {
 	p := trustedProxyPrefixes.Load()
@@ -128,7 +137,9 @@ func remotePeerIP(c *gin.Context) string {
 //  1. 直连地址不在 server.trusted_proxies 内时，忽略所有转发头，直接返回直连地址；
 //  2. 直连地址可信且旧版兼容开关（security.trust_forwarded_ip_for_api_key_acl）
 //     开启时，按旧版优先级解析自定义头、CF-Connecting-IP、X-Real-IP、X-Forwarded-For；
-//  3. 直连地址可信且兼容开关关闭（默认）时，从右往左遍历 X-Forwarded-For，
+//  3. 直连地址可信且兼容开关关闭（默认）时，若开启了 T-5 开关并配置了 security.forwarded_client_ip_headers
+//     （如 CF-Connecting-IP），按配置顺序取第一个「恰好一行、单个合法 IP」的头（T-5）；
+//  4. 否则从右往左遍历 X-Forwarded-For，
 //     跳过可信代理，取第一个不可信地址；没有 X-Forwarded-For 时使用 X-Real-IP。
 func ClientIP(c *gin.Context) string {
 	peer := remotePeerIP(c)
@@ -137,6 +148,11 @@ func ClientIP(c *gin.Context) string {
 	}
 	if requestUsesLegacyForwardedIPTrust(c) {
 		return legacyForwardedClientIP(c, peer)
+	}
+	// T-5：新模式下，开关 security.honor_forwarded_client_ip_headers_from_trusted_proxies 开启且直连可信时，
+	// 优先使用 security.forwarded_client_ip_headers 中配置的单值头（如 CF-Connecting-IP）。默认关闭。
+	if resolved := trustedSingleValueHeaderIP(c); resolved != "" {
+		return resolved
 	}
 	if resolved := trustedChainClientIP(c); resolved != "" {
 		return resolved
@@ -197,6 +213,28 @@ func trustedChainClientIP(c *gin.Context) string {
 			}
 		}
 		if resolved != "" {
+			return resolved
+		}
+	}
+	return ""
+}
+
+// trustedSingleValueHeaderIP（T-5）只在调用方已确认直连地址可信后使用：按配置顺序检查单值头，
+// 头必须恰好出现一行且值为单个合法 IP（含逗号的列表、多行、非法值都视为不可信并跳过）。
+func trustedSingleValueHeaderIP(c *gin.Context) string {
+	if !honorSingleValueHeaders.Load() {
+		return ""
+	}
+	settings, ok := requestForwardedIPSettings(c)
+	if !ok || len(settings.headers) == 0 {
+		return ""
+	}
+	for _, header := range settings.headers {
+		value := strings.TrimSpace(singleValueForwardedHeader(c.Request.Header, header))
+		if value == "" || strings.Contains(value, ",") {
+			continue
+		}
+		if resolved := normalizeValidIP(value); resolved != "" {
 			return resolved
 		}
 	}

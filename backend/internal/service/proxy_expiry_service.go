@@ -5,6 +5,8 @@ import (
 	"log"
 	"sync"
 	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/safego"
 )
 
 // ProxyExpiryService 周期扫描到期代理并把绑定账号改投备用/直连。
@@ -26,14 +28,15 @@ func (s *ProxyExpiryService) Start() {
 	}
 	s.wg.Add(1)
 	go func() {
+		defer safego.Recover("scheduler.proxy_expiry")
 		defer s.wg.Done()
 		ticker := time.NewTicker(s.interval)
 		defer ticker.Stop()
-		s.runOnce()
+		safego.Tick("scheduler.proxy_expiry", s.runOnce)
 		for {
 			select {
 			case <-ticker.C:
-				s.runOnce()
+				safego.Tick("scheduler.proxy_expiry", s.runOnce)
 			case <-s.stopCh:
 				return
 			}

@@ -6,6 +6,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/safego"
 )
 
 const (
@@ -62,15 +64,16 @@ func (s *OpenAICodexVersionSyncService) Start() {
 	}
 	s.wg.Add(1)
 	go func() {
+		defer safego.Recover("scheduler.openai_codex_version_sync")
 		defer s.wg.Done()
 		ticker := time.NewTicker(s.interval)
 		defer ticker.Stop()
 
-		s.runInitial()
+		safego.Tick("scheduler.openai_codex_version_sync", s.runInitial)
 		for {
 			select {
 			case <-ticker.C:
-				s.runOnce()
+				safego.Tick("scheduler.openai_codex_version_sync", s.runOnce)
 			case <-s.stopCh:
 				return
 			}

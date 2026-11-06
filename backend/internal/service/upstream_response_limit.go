@@ -23,6 +23,15 @@ func resolveUpstreamResponseReadLimit(cfg *config.Config) int64 {
 	return defaultUpstreamResponseReadMaxBytes
 }
 
+// upstreamReadLimitConfig returns the config used to size non-streaming
+// upstream reads for the Antigravity gateway (nil-safe).
+func (s *AntigravityGatewayService) upstreamReadLimitConfig() *config.Config {
+	if s == nil || s.settingService == nil {
+		return nil
+	}
+	return s.settingService.cfg
+}
+
 func readUpstreamResponseBodyLimited(reader io.Reader, maxBytes int64) ([]byte, error) {
 	if reader == nil {
 		return nil, errors.New("response body is nil")

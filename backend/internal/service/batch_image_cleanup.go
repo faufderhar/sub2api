@@ -10,6 +10,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/safego"
 	"go.uber.org/zap"
 )
 
@@ -147,11 +148,12 @@ func (s *BatchImageCleanupService) Start() {
 	s.cancel = cancel
 	s.done = make(chan struct{})
 	go func() {
+		defer safego.Recover("scheduler.batch_image_cleanup")
 		defer close(s.done)
 		ticker := time.NewTicker(s.cleanupInterval())
 		defer ticker.Stop()
 		for {
-			_, _ = s.RunOnce(ctx, time.Now())
+			safego.Tick("scheduler.batch_image_cleanup", func() { _, _ = s.RunOnce(ctx, time.Now()) })
 			select {
 			case <-ctx.Done():
 				return

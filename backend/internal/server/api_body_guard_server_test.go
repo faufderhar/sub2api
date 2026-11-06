@@ -67,3 +67,15 @@ func TestAPIBodyGuardOnRealServerRejectsBeforeBody(t *testing.T) {
 	require.Equal(t, http.StatusOK, gw.StatusCode)
 	require.Equal(t, fmt.Sprint(2<<20), string(body))
 }
+
+func TestT3_NewAPIBodyGuardConfigMCPLimit(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Server.MaxRequestBodySize = 256 << 20
+	got := newAPIBodyGuardConfig(cfg)
+	require.Equal(t, int64(16<<20), got.RouteBodyLimits["POST /api/v1/mcp"])
+
+	cfg.Server.MCPMaxRequestBodySize = 4 << 20
+	got = newAPIBodyGuardConfig(cfg)
+	require.Equal(t, int64(4<<20), got.RouteBodyLimits["POST /api/v1/mcp"])
+	require.Equal(t, int64(4<<20), mcpMaxRequestBodySize(cfg))
+}

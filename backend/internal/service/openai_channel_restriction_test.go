@@ -117,6 +117,10 @@ func TestIsUpstreamModelRestrictedByChannel_CompactMappingMatchesForwardPath(t *
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
+			// Each parallel subtest needs its own Account: GetModelMapping lazily
+			// fills an unsynchronized per-Account cache (L-12).
+			accountCopy := *account
+			account := &accountCopy
 
 			channelSvc := newTestChannelService(makeStandardRepo(Channel{
 				ID:                 1,
@@ -186,6 +190,10 @@ func TestIsUpstreamModelRestrictedByChannel_PassthroughMatchesForwardPath(t *tes
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
+			// Each parallel subtest needs its own Account: GetModelMapping lazily
+			// fills an unsynchronized per-Account cache (L-12).
+			accountCopy := *account
+			account := &accountCopy
 
 			channelSvc := newTestChannelService(makeStandardRepo(Channel{
 				ID:                 1,
@@ -243,6 +251,10 @@ func TestIsUpstreamModelRestrictedByChannel_PassthroughFlagWithRawChatFallbackMa
 		}
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
+			// Each parallel subtest needs its own Account: GetModelMapping lazily
+			// fills an unsynchronized per-Account cache (L-12).
+			accountCopy := *account
+			account := &accountCopy
 
 			channelSvc := newTestChannelService(makeStandardRepo(Channel{
 				ID:                 1,

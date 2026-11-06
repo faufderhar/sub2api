@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/safego"
 	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	"github.com/gin-gonic/gin"
 	"github.com/imroc/req/v3"
@@ -1185,6 +1186,7 @@ func (s *OpenAIGatewayService) handleOpenAIImagesStreamingResponse(
 	var lastReadAt int64
 	atomic.StoreInt64(&lastReadAt, time.Now().UnixNano())
 	go func() {
+		defer safego.Recover("openai.images_sse_reader")
 		defer close(events)
 		reader := bufio.NewReader(resp.Body)
 		for {
