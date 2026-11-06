@@ -55,7 +55,7 @@ func adminAuth(
 				return
 			}
 			if strings.Contains(c.FullPath(), "/settings/admin-api-key") {
-				AbortWithError(c, 403, "FORBIDDEN", "仅 JWT 管理员可管理密钥")
+				abortAdminKeyManagementDenied(c, "仅 JWT 管理员可管理密钥")
 				recordAdminKeyRequest(c, auditService, nil)
 				return
 			}
@@ -257,7 +257,7 @@ func authenticateScopedAdminRequest(c *gin.Context, key string, settings *servic
 	c.Set(auditCtxKeySkip, true)
 	if strings.Contains(c.FullPath(), "/settings/admin-api-key") || !adminaccess.RouteAllowed(item.Policy, c.Request.Method, c.FullPath()) {
 		c.Set("admin_key_denial_reason", "permission_denied")
-		AbortWithError(c, 403, "FORBIDDEN", "管理密钥未获此操作权限")
+		abortAdminKeyManagementDenied(c, "管理密钥未获此操作权限")
 		return
 	}
 	c.Next()
@@ -279,4 +279,43 @@ func recordAdminKeyRequest(c *gin.Context, audit *service.AuditLogService, item 
 		entry.Extra["denial_reason"] = reason
 	}
 	audit.Record(entry)
+}
+
+// stepUpAdminKeyManagementRoutes 是挂了 stepUpAuth 的 7 条密钥管理路由（method + gin FullPath）。
+// admin API key 在到达 step-up 中间件之前就会被本文件的权限检查拒绝；对这 7 条路由，
+// 拒绝响应改用 step-up 约定的信封和 reason（BD2-6），前端/脚本据此识别「机器凭证被拒」。
+// 只改变拒绝响应的内容，不改变拒绝本身：这些请求仍然是 403，不会进入 handler。
+var stepUpAdminKeyManagementRoutes = []string{
+	"POST /api/v1/admin/settings/admin-api-key/regenerate",
+	"DELETE /api/v1/admin/settings/admin-api-key",
+	"POST /api/v1/admin/settings/admin-api-keys",
+	"PUT /api/v1/admin/settings/admin-api-keys/:id",
+	"POST /api/v1/admin/settings/admin-api-keys/:id/rotate",
+	"DELETE /api/v1/admin/settings/admin-api-keys/:id",
+	"DELETE /api/v1/admin/settings/admin-api-keys/:id/record",
+}
+
+// StepUpAdminKeyManagementRoutes 返回上述路由清单的副本（供路由注册一致性测试使用）。
+func StepUpAdminKeyManagementRoutes() []string {
+	return append([]string(nil), stepUpAdminKeyManagementRoutes...)
+}
+
+func isStepUpAdminKeyManagementRoute(method, fullPath string) bool {
+	target := method + " " + fullPath
+	for _, route := range stepUpAdminKeyManagementRoutes {
+		if route == target {
+			return true
+		}
+	}
+	return false
+}
+
+// abortAdminKeyManagementDenied 以 403 拒绝 admin API key 请求：
+// 命中 step-up 密钥管理路由时返回 reason=STEP_UP_ADMIN_API_KEY_FORBIDDEN，其余保持原 FORBIDDEN。
+func abortAdminKeyManagementDenied(c *gin.Context, forbiddenMessage string) {
+	if c.Request != nil && isStepUpAdminKeyManagementRoute(c.Request.Method, c.FullPath()) {
+		abortStepUp(c, 403, "STEP_UP_ADMIN_API_KEY_FORBIDDEN", StepUpMachineCredentialMessage)
+		return
+	}
+	AbortWithError(c, 403, "FORBIDDEN", forbiddenMessage)
 }
