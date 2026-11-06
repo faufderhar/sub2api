@@ -73,7 +73,10 @@ func TestL8_StatusReportsTokenRequired(t *testing.T) {
 	r := newSetupTokenTestRouter(t)
 	rec := doSetupRequest(r, http.MethodGet, "/setup/status", "", "")
 	require.Equal(t, http.StatusOK, rec.Code)
-	data := decodeEnvelope(t, rec)["data"].(map[string]any)
+	data, ok := decodeEnvelope(t, rec)["data"].(map[string]any)
+	if !ok {
+		t.Fatal("setup status envelope data is not an object")
+	}
 	require.Equal(t, true, data["setup_token_required"])
 	require.Equal(t, true, data["needs_setup"])
 }

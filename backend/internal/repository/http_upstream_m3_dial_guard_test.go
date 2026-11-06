@@ -92,16 +92,21 @@ func TestM3_TLSFingerprintDirectRejectsAtDial(t *testing.T) {
 	require.ErrorIs(t, err, urlvalidator.ErrDialAddressNotAllowed)
 }
 
-func m3GuardedService() *httpUpstreamService {
+func m3GuardedService(t *testing.T) *httpUpstreamService {
+	t.Helper()
 	cfg := &config.Config{}
 	cfg.Security.URLAllowlist.Enabled = true
 	cfg.Security.URLAllowlist.AllowPrivateHosts = false
-	return NewHTTPUpstream(cfg).(*httpUpstreamService)
+	svc, ok := NewHTTPUpstream(cfg).(*httpUpstreamService)
+	if !ok {
+		t.Fatal("NewHTTPUpstream did not return *httpUpstreamService")
+	}
+	return svc
 }
 
 // 重定向到元数据地址/CGNAT/回环同样被拦截。
 func TestM3_RedirectToReservedRangesRejected(t *testing.T) {
-	s := m3GuardedService()
+	s := m3GuardedService(t)
 	require.True(t, s.shouldValidateResolvedIP())
 	for _, target := range []string{"http://169.254.169.254/latest/meta-data", "http://100.64.0.1/", "http://127.0.0.1/", "http://198.18.0.1/", "http://localhost/"} {
 		req, err := http.NewRequest(http.MethodGet, target, nil)
@@ -113,7 +118,7 @@ func TestM3_RedirectToReservedRangesRejected(t *testing.T) {
 // 端到端：开启校验的服务，经 Do 访问解析到回环的域名被拒（DNS 校验 + 拨号层双保险）。
 func TestM3_ServiceDoRejectsLoopbackWhenPrivateDisabled(t *testing.T) {
 	_, target := m3LocalServer(t)
-	s := m3GuardedService()
+	s := m3GuardedService(t)
 	req, err := http.NewRequest(http.MethodGet, target, nil)
 	require.NoError(t, err)
 	resp, err := s.Do(req, "", 1, 1)
