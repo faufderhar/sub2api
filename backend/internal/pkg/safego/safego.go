@@ -31,10 +31,12 @@ func Go(ctx context.Context, name string, fn func(ctx context.Context)) {
 	if fn == nil {
 		return
 	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	go Run(ctx, name, fn)
+	go runDetached(ctx, name, fn)
+}
+
+// runDetached 是 Go 启动的 goroutine 主体：直接沿用调用方传入的 ctx（Run 负责 nil 兜底）。
+func runDetached(ctx context.Context, name string, fn func(ctx context.Context)) {
+	Run(ctx, name, fn)
 }
 
 // Run 在当前 goroutine 同步运行 fn，并恢复 panic（用于已有 go 语句或 worker 循环内部）。
@@ -72,8 +74,9 @@ func Recover(name string) {
 
 func record(ctx context.Context, name string, r any, stack []byte) {
 	totalPanics.Add(1)
-	counter, _ := byName.LoadOrStore(name, new(atomic.Int64))
-	counter.(*atomic.Int64).Add(1)
+	if counter := counterFor(name, true); counter != nil {
+		counter.Add(1)
+	}
 	logger.FromContext(ctx).Error("goroutine panic recovered",
 		zap.String("component", "safego"),
 		zap.String("goroutine", name),
@@ -82,13 +85,28 @@ func record(ctx context.Context, name string, r any, stack []byte) {
 	)
 }
 
+// counterFor 返回名称对应的计数器；create 为 true 时不存在就创建。
+func counterFor(name string, create bool) *atomic.Int64 {
+	var v any
+	if create {
+		v, _ = byName.LoadOrStore(name, new(atomic.Int64))
+	} else {
+		var ok bool
+		if v, ok = byName.Load(name); !ok {
+			return nil
+		}
+	}
+	counter, _ := v.(*atomic.Int64)
+	return counter
+}
+
 // TotalPanics 返回进程启动以来被恢复的 panic 总数（指标）。
 func TotalPanics() int64 { return totalPanics.Load() }
 
 // PanicCount 返回指定名称的 goroutine 被恢复的 panic 次数。
 func PanicCount(name string) int64 {
-	if v, ok := byName.Load(name); ok {
-		return v.(*atomic.Int64).Load()
+	if counter := counterFor(name, false); counter != nil {
+		return counter.Load()
 	}
 	return 0
 }
@@ -97,7 +115,11 @@ func PanicCount(name string) int64 {
 func Snapshot() map[string]int64 {
 	out := map[string]int64{}
 	byName.Range(func(k, v any) bool {
-		out[k.(string)] = v.(*atomic.Int64).Load()
+		name, okName := k.(string)
+		counter, okCounter := v.(*atomic.Int64)
+		if okName && okCounter {
+			out[name] = counter.Load()
+		}
 		return true
 	})
 	return out
