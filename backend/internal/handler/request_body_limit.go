@@ -4,9 +4,12 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	pkghttputil "github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
+
+	"github.com/gin-gonic/gin"
 )
 
 func extractMaxBytesError(err error) (*http.MaxBytesError, bool) {
@@ -38,4 +41,28 @@ func gatewayMaxBodySize(cfg *config.Config) int64 {
 		return 0
 	}
 	return cfg.Gateway.MaxBodySize
+}
+
+const requestBodyReadTimeoutMessage = "Request body read timed out"
+const requestBodyReadTimeoutType = "REQUEST_BODY_TIMEOUT"
+
+func isRequestBodyReadTimeout(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, os.ErrDeadlineExceeded) {
+		return true
+	}
+	var ne interface{ Timeout() bool }
+	return errors.As(err, &ne) && ne.Timeout()
+}
+
+// applyRequestBodyReadTimeout reports whether err is a request-body read timeout.
+// When it is, Connection: close is set so the server does not try to drain the rest of the body.
+func applyRequestBodyReadTimeout(c *gin.Context, err error) bool {
+	if c == nil || !isRequestBodyReadTimeout(err) {
+		return false
+	}
+	c.Header("Connection", "close")
+	return true
 }

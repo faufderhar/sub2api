@@ -46,6 +46,10 @@ func (h *OpenAIGatewayHandler) ResponsesInputTokens(c *gin.Context) {
 			h.errorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
 			return
 		}
+		if applyRequestBodyReadTimeout(c, err) {
+			h.errorResponse(c, http.StatusRequestTimeout, requestBodyReadTimeoutType, requestBodyReadTimeoutMessage)
+			return
+		}
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
 		return
 	}
@@ -139,6 +143,10 @@ func (h *OpenAIGatewayHandler) GrokCountTokens(c *gin.Context) {
 			h.anthropicErrorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
 			return
 		}
+		if applyRequestBodyReadTimeout(c, err) {
+			h.anthropicErrorResponse(c, http.StatusRequestTimeout, requestBodyReadTimeoutType, requestBodyReadTimeoutMessage)
+			return
+		}
 		h.anthropicErrorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
 		return
 	}
@@ -207,6 +215,10 @@ func (h *OpenAIGatewayHandler) CountTokens(c *gin.Context) {
 	if err != nil {
 		if maxErr, ok := extractMaxBytesError(err); ok {
 			h.anthropicErrorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
+			return
+		}
+		if applyRequestBodyReadTimeout(c, err) {
+			h.anthropicErrorResponse(c, http.StatusRequestTimeout, requestBodyReadTimeoutType, requestBodyReadTimeoutMessage)
 			return
 		}
 		h.anthropicErrorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
