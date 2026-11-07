@@ -116,7 +116,9 @@ export default {
         regenerateCancel: 'Cancel',
         regenerateSuccess: 'Fingerprint regenerated',
         regenerateFailed: 'Failed to regenerate fingerprint',
-        generationConflict: 'The fingerprint was updated elsewhere. The summary has been refreshed; review it before trying again.'
+        generationConflict: 'The fingerprint was updated elsewhere. The summary has been refreshed; review it before trying again.',
+        listBadge: 'Fingerprint',
+        listIsolatedBadge: 'Isolated'
       },
       allPlatforms: 'All Platforms',
       allTypes: 'All Types',

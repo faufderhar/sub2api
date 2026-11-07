@@ -1357,6 +1357,10 @@ export interface Account {
   rpm_sticky_buffer?: number | null
   user_msg_queue_mode?: string | null  // "serialize" | "throttle" | null
 
+  // R3-FP list flags (no fingerprint secrets). Present on GET /admin/accounts items.
+  has_fingerprint?: boolean
+  fingerprint_isolated?: boolean
+
   // TLS指纹伪装（仅 Anthropic OAuth/SetupToken 账号有效）
   enable_tls_fingerprint?: boolean | null
   tls_fingerprint_profile_id?: number | null

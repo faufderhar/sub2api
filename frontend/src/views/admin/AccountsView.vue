@@ -249,6 +249,18 @@
               >
                 {{ accountDisplayEmail(row) }}
               </span>
+              <div v-if="row.has_fingerprint || row.fingerprint_isolated" class="mt-1 flex flex-wrap gap-1">
+                <span
+                  v-if="row.has_fingerprint"
+                  class="inline-flex rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                  data-testid="fingerprint-badge"
+                >{{ t('admin.accounts.fingerprint.listBadge') }}</span>
+                <span
+                  v-if="row.fingerprint_isolated"
+                  class="inline-flex rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800 dark:bg-amber-900/40 dark:text-amber-200"
+                  data-testid="fingerprint-isolated-badge"
+                >{{ t('admin.accounts.fingerprint.listIsolatedBadge') }}</span>
+              </div>
             </div>
           </template>
           <template #cell-notes="{ value }">

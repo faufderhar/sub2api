@@ -115,7 +115,9 @@ export default {
         regenerateCancel: '取消',
         regenerateSuccess: '指纹已再生',
         regenerateFailed: '再生指纹失败',
-        generationConflict: '指纹已被更新，摘要已刷新，请核对后再试。'
+        generationConflict: '指纹已被更新，摘要已刷新，请核对后再试。',
+        listBadge: '指纹',
+        listIsolatedBadge: '已隔离'
       },
       // Filter options
       allPlatforms: '全部平台',
