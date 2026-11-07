@@ -31,9 +31,6 @@ export const HOME_IFRAME_SANDBOX_DEFAULT = [
   'allow-forms'
 ] as const
 
-/** allow-same-origin 永不写入不可信首页 iframe（A-1 + R3-IFRAME），管理员自写也不能加回。 */
-const HOME_IFRAME_SANDBOX_FORBIDDEN = 'allow-same-origin'
-
 /**
  * iframe src 是否与本站同源。用 new URL(src, location.href) 解析；相对路径算同源。
  * 无法解析时返回 false。R3-IFRAME 后 sandbox 计算不再依赖此结果，保留供测试与诊断。
@@ -65,7 +62,7 @@ export function resolveHomeIframeSandbox(
   existing: string | null | undefined,
   _src?: string | null
 ): string {
-  const allowed = HOME_IFRAME_SANDBOX_DEFAULT.filter((t) => t !== HOME_IFRAME_SANDBOX_FORBIDDEN)
+  const allowed = [...HOME_IFRAME_SANDBOX_DEFAULT]
   const allowedSet = new Set<string>(allowed)
 
   if (existing === null || existing === undefined) {
