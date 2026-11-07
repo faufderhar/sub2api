@@ -205,6 +205,12 @@ func createAccountRecord(ctx context.Context, client *dbent.Client, account *ser
 	account.ID = created.ID
 	account.CreatedAt = created.CreatedAt
 	account.UpdatedAt = created.UpdatedAt
+	if err := ensureCreatedClaudeFingerprint(ctx, client, account); err != nil {
+		if _, delErr := client.Account.Delete().Where(dbaccount.IDEQ(created.ID)).Exec(ctx); delErr != nil {
+			logger.LegacyPrintf("repository.account", "rollback fingerprint-less account %d failed: %v", created.ID, delErr)
+		}
+		return err
+	}
 	return nil
 }
 

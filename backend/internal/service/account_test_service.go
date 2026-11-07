@@ -153,11 +153,18 @@ type AccountTestService struct {
 	modelMetadataRegistryAt   time.Time
 	pluginManager             *PluginManager
 	openaiGatewayService      *OpenAIGatewayService
+	identityService           *IdentityService
 	agentIdentityTaskMu       sync.Mutex
 	agentIdentityWS           agentIdentityWSConnectionInvalidator
 	// grokWSDialer is optional; realtime account tests use the default OpenAI-style
 	// WS dialer when nil (supports proxy + coder/websocket handshake).
 	grokWSDialer openAIWSClientDialer
+}
+
+func (s *AccountTestService) SetIdentityService(identityService *IdentityService) {
+	if s != nil {
+		s.identityService = identityService
+	}
 }
 
 func (s *AccountTestService) SetSettingService(settingService *SettingService) {
@@ -303,19 +310,57 @@ func (s *AccountTestService) validateUpstreamBaseURL(raw string) (string, error)
 // The output format is determined by the UA version in claude.DefaultHeaders(),
 // ensuring consistency between the user_id format and the UA sent to upstream.
 func generateSessionString() (string, error) {
-	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
-		return "", err
+	return generateSessionStringFromFingerprint(nil)
+}
+
+func generateSessionStringFromFingerprint(fp *Fingerprint) (string, error) {
+	var hex64 string
+	if fp != nil && fp.ClientID != "" {
+		hex64 = fp.ClientID
+	} else {
+		b := make([]byte, 32)
+		if _, err := rand.Read(b); err != nil {
+			return "", err
+		}
+		hex64 = hex.EncodeToString(b)
 	}
-	hex64 := hex.EncodeToString(b)
 	sessionUUID := uuid.New().String()
-	uaVersion := ExtractCLIVersion(claude.DefaultHeaders()["User-Agent"])
+	ua := claude.DefaultUserAgent()
+	if fp != nil && fp.UserAgent != "" {
+		ua = fp.UserAgent
+	}
+	uaVersion := ExtractCLIVersion(ua)
 	return FormatMetadataUserID(hex64, "", sessionUUID, uaVersion), nil
+}
+
+func (s *AccountTestService) accountFingerprint(ctx context.Context, account *Account) *Fingerprint {
+	if s == nil || s.identityService == nil || account == nil || !account.IsAnthropicOAuthOrSetupToken() {
+		return nil
+	}
+	fp, err := s.identityService.GetOrCreateForAccount(ctx, account, nil)
+	if err != nil {
+		return nil
+	}
+	return fp
+}
+
+func (s *AccountTestService) applyClaudeIdentityHeaders(ctx context.Context, req *http.Request, account *Account) {
+	if req == nil {
+		return
+	}
+	s.applyClaudeIdentityHeaders(ctx, req, account)
+	if fp := s.accountFingerprint(ctx, account); fp != nil && s.identityService != nil {
+		s.identityService.ApplyFingerprint(req, fp)
+	}
 }
 
 // createTestPayload creates a Claude Code style test request payload
 func createTestPayload(modelID string) (map[string]any, error) {
-	sessionID, err := generateSessionString()
+	return createTestPayloadWithFingerprint(modelID, nil)
+}
+
+func createTestPayloadWithFingerprint(modelID string, fp *Fingerprint) (map[string]any, error) {
+	sessionID, err := generateSessionStringFromFingerprint(fp)
 	if err != nil {
 		return nil, err
 	}
@@ -561,7 +606,7 @@ func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account
 	c.Writer.Flush()
 
 	// Create Claude Code style payload (same for all account types)
-	payload, err := createTestPayload(testModelID)
+	payload, err := createTestPayloadWithFingerprint(testModelID, s.accountFingerprint(ctx, account))
 	if err != nil {
 		return s.sendErrorAndEnd(c, "Failed to create test payload")
 	}
@@ -580,9 +625,7 @@ func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account
 	req.Header.Set("anthropic-version", "2023-06-01")
 
 	// Apply Claude Code client headers
-	for key, value := range claude.DefaultHeaders() {
-		req.Header.Set(key, value)
-	}
+	s.applyClaudeIdentityHeaders(ctx, req, account)
 
 	// Set authentication header
 	if account.IsOAuth() {
@@ -639,7 +682,7 @@ func (s *AccountTestService) testClaudeVertexServiceAccountConnection(c *gin.Con
 	c.Writer.Header().Set("X-Accel-Buffering", "no")
 	c.Writer.Flush()
 
-	payload, err := createTestPayload(testModelID)
+	payload, err := createTestPayloadWithFingerprint(testModelID, s.accountFingerprint(ctx, account))
 	if err != nil {
 		return s.sendErrorAndEnd(c, "Failed to create test payload")
 	}

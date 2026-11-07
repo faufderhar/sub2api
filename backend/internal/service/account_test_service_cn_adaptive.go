@@ -71,7 +71,7 @@ func (s *AccountTestService) testCNProviderAdaptiveAnthropicConnection(c *gin.Co
 	}
 	apiURL := strings.TrimRight(baseURL, "/") + "/v1/messages"
 
-	payload, err := createTestPayload(testModelID)
+	payload, err := createTestPayloadWithFingerprint(testModelID, s.accountFingerprint(ctx, account))
 	if err != nil {
 		return s.sendErrorAndEnd(c, "Failed to create adaptive Anthropic test payload")
 	}
@@ -85,9 +85,7 @@ func (s *AccountTestService) testCNProviderAdaptiveAnthropicConnection(c *gin.Co
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "text/event-stream")
 	req.Header.Set("anthropic-version", "2023-06-01")
-	for key, value := range claude.DefaultHeaders() {
-		req.Header.Set(key, value)
-	}
+	s.applyClaudeIdentityHeaders(ctx, req, account)
 	req.Header.Set("anthropic-beta", claude.APIKeyBetaHeader)
 	// Ollama Cloud Anthropic 兼容端点按 adaptive 实际选用的 Anthropic
 	// base_url 强制 Bearer，其余保持 extra/default 行为。
@@ -256,7 +254,7 @@ func (s *AccountTestService) testCNProviderAnthropicConnection(c *gin.Context, a
 	c.Writer.Header().Set("X-Accel-Buffering", "no")
 	c.Writer.Flush()
 
-	payload, err := createTestPayload(testModelID)
+	payload, err := createTestPayloadWithFingerprint(testModelID, s.accountFingerprint(ctx, account))
 	if err != nil {
 		return s.sendErrorAndEnd(c, "Failed to create Anthropic test payload")
 	}
@@ -271,9 +269,7 @@ func (s *AccountTestService) testCNProviderAnthropicConnection(c *gin.Context, a
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "text/event-stream")
 	req.Header.Set("anthropic-version", "2023-06-01")
-	for key, value := range claude.DefaultHeaders() {
-		req.Header.Set(key, value)
-	}
+	s.applyClaudeIdentityHeaders(ctx, req, account)
 	// Ollama Cloud Anthropic 兼容端点按实际 base_url 强制 Bearer，其余保持
 	// extra/default 行为。
 	setAnthropicAPIKeyAuthHeader(req.Header, account, authToken, account.GetAnthropicProtocolBaseURL())

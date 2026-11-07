@@ -240,6 +240,7 @@ func ProvideAccountUsageService(
 	identityCache IdentityCache,
 	tlsFPProfileService *TLSFingerprintProfileService,
 	openAIGatewayService *OpenAIGatewayService,
+	identityService *IdentityService,
 ) *AccountUsageService {
 	service := NewAccountUsageService(
 		accountRepo,
@@ -255,6 +256,7 @@ func ProvideAccountUsageService(
 		tlsFPProfileService,
 	)
 	service.agentIdentityWS = openAIGatewayService
+	service.identityService = identityService
 	return service
 }
 
@@ -270,6 +272,7 @@ func ProvideAccountTestService(
 	openAIGatewayService *OpenAIGatewayService,
 	settingService *SettingService,
 	pluginManager *PluginManager,
+	identityService *IdentityService,
 ) *AccountTestService {
 	service := NewAccountTestService(
 		accountRepo,
@@ -283,6 +286,7 @@ func ProvideAccountTestService(
 	)
 	service.agentIdentityWS = openAIGatewayService
 	service.SetOpenAIGatewayService(openAIGatewayService)
+	service.SetIdentityService(identityService)
 	service.SetSettingService(settingService)
 	service.SetPluginManager(pluginManager)
 	return service

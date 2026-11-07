@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"math/rand/v2"
+	"slices"
 	"sync"
 	"time"
 
@@ -184,14 +186,37 @@ func (s *TLSFingerprintProfileService) ResolveTLSProfile(account *Account) *tlsf
 			return p
 		}
 	}
-	if id == -1 {
-		// 随机选择一个 profile
-		if p := s.getRandomProfile(); p != nil {
-			return p
-		}
+	// R3-FP D10: 未显式绑定（含历史 -1 随机）改为按账号哈希固定选取。
+	if p := s.getStickyProfile(account); p != nil {
+		return p
 	}
 	// TLS 启用但无绑定 profile → 空 Profile → dialer 使用内置默认值
 	return &tlsfingerprint.Profile{Name: "Built-in Default (Node.js 24.x)"}
+}
+
+func (s *TLSFingerprintProfileService) ProfileIDs() []int64 { return s.listProfileIDs() }
+
+func (s *TLSFingerprintProfileService) listProfileIDs() []int64 {
+	s.localMu.Lock()
+	defer s.localMu.Unlock()
+	ids := make([]int64, 0, len(s.localCache))
+	for id := range s.localCache {
+		ids = append(ids, id)
+	}
+	slices.Sort(ids)
+	return ids
+}
+
+func (s *TLSFingerprintProfileService) getStickyProfile(account *Account) *tlsfingerprint.Profile {
+	ids := s.listProfileIDs()
+	if len(ids) == 0 {
+		return nil
+	}
+	seed := fmt.Sprintf("%d", account.ID)
+	if account.IsAnthropicOAuthOrSetupToken() {
+		seed = fmt.Sprintf("account:%d", account.ID)
+	}
+	return s.GetProfileByID(ids[stickyIndex(seed, len(ids))])
 }
 
 // --- 缓存管理 ---

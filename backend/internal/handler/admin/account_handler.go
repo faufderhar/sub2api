@@ -70,6 +70,9 @@ type AccountHandler struct {
 	ollamaCloudUsage        *service.OllamaCloudUsageService
 	cfg                     *config.Config
 	opencodeGoUsage         *service.OpenCodeGoUsageService
+	identityService         *service.IdentityService
+	settingService          *service.SettingService
+	tlsFPProfileService     *service.TLSFingerprintProfileService
 }
 
 // SetUpstreamBillingProbeService attaches the optional remote billing probe service.
@@ -83,6 +86,18 @@ func (h *AccountHandler) SetOllamaCloudUsageService(usage *service.OllamaCloudUs
 
 func (h *AccountHandler) SetOpenCodeGoUsageService(usage *service.OpenCodeGoUsageService) {
 	h.opencodeGoUsage = usage
+}
+
+func (h *AccountHandler) SetIdentityService(identityService *service.IdentityService) {
+	h.identityService = identityService
+}
+
+func (h *AccountHandler) SetSettingService(settingService *service.SettingService) {
+	h.settingService = settingService
+}
+
+func (h *AccountHandler) SetTLSFingerprintProfileService(svc *service.TLSFingerprintProfileService) {
+	h.tlsFPProfileService = svc
 }
 
 // NewAccountHandler creates a new admin account handler
@@ -840,6 +855,8 @@ func (h *AccountHandler) List(c *gin.Context) {
 
 		result[i] = item
 	}
+
+	h.attachFingerprintListFlags(c.Request.Context(), accounts, result)
 
 	h.enrichShadowParents(c.Request.Context(), result)
 

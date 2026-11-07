@@ -93,24 +93,22 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 	}
 	if account.IsOAuth() && s.identityService != nil {
 		// 1. 获取或创建指纹（包含随机生成的ClientID）
-		fp, err := s.identityService.GetOrCreateFingerprint(ctx, account.ID, clientHeaders)
+		fp, err := s.identityService.GetOrCreateForAccount(ctx, account, clientHeaders)
 		if err != nil {
 			logger.LegacyPrintf("service.gateway", "Warning: failed to get fingerprint for account %d: %v", account.ID, err)
-			// 失败时降级为透传原始headers
+			// 失败时不回退随机身份
 		} else {
 			if enableFP {
 				fingerprint = fp
 			}
 
-			// 2. 重写metadata.user_id（需要指纹中的ClientID和账号的account_uuid）
+			// 2. 重写metadata.user_id（device 必须取持久 ClientID；account_uuid 可为空）
 			// 如果启用了会话ID伪装，会在重写后替换 session 部分为固定值
 			// 当 metadata 透传开启时跳过重写
-			if !enableMPT {
+			if !enableMPT && fp != nil && fp.ClientID != "" {
 				accountUUID := account.GetExtraString("account_uuid")
-				if accountUUID != "" && fp.ClientID != "" {
-					if newBody, err := s.identityService.RewriteUserIDWithMasking(ctx, body, account, accountUUID, fp.ClientID, fp.UserAgent); err == nil && len(newBody) > 0 {
-						body = newBody
-					}
+				if newBody, err := s.identityService.RewriteUserIDWithMasking(ctx, body, account, accountUUID, fp.ClientID, fp.UserAgent); err == nil && len(newBody) > 0 {
+					body = newBody
 				}
 			}
 		}
@@ -120,6 +118,10 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 	// 请求体 x-anthropic-billing-header 的 cc_version 都源自这一个字符串，
 	// 避免运行期版本缓存翻转瞬间头/体版本自相矛盾（会被判非正版客户端）。
 	mimicUserAgent := claude.DefaultUserAgent()
+	if fingerprint != nil && fingerprint.UserAgent != "" {
+		// D5: mimic 使用持久账号指纹，不再用全局 DefaultUserAgent 覆盖身份。
+		mimicUserAgent = fingerprint.UserAgent
+	}
 
 	// Mimicry may override the cached User-Agent later, even without a fingerprint.
 	if billingUA := effectiveBillingUserAgent(mimicUserAgent, tokenType, mimicClaudeCode, fingerprint); billingUA != "" {
@@ -191,11 +193,6 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 		}
 	}
 
-	// OAuth账号：应用缓存的指纹到请求头（覆盖白名单透传的头）
-	if fingerprint != nil {
-		s.identityService.ApplyFingerprint(req, fingerprint)
-	}
-
 	// 确保必要的headers存在（保持原始大小写）
 	if getHeaderRaw(req.Header, "content-type") == "" {
 		setHeaderRaw(req.Header, "content-type", "application/json")
@@ -211,6 +208,11 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 	// （user-agent/x-stainless-*/x-app/Accept/x-stainless-helper-method/x-client-request-id）
 	if tokenType == "oauth" && mimicClaudeCode {
 		applyClaudeCodeMimicHeaders(req, reqStream, mimicUserAgent)
+	}
+
+	// OAuth账号：应用持久指纹（必须在 mimic 之后，避免 DefaultHeaders 覆盖身份）。
+	if fingerprint != nil && s.identityService != nil {
+		s.identityService.ApplyFingerprint(req, fingerprint)
 	}
 
 	// 写入最终 anthropic-beta header

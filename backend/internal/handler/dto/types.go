@@ -331,6 +331,9 @@ type Account struct {
 
 	// 仅账号详情填充。列表和公共 mapper 不计算，避免把目录诊断扩散到调度响应。
 	GrokModelDiagnostics *service.GrokModelDiagnostics `json:"grok_model_diagnostics,omitempty"`
+
+	HasFingerprint      bool `json:"has_fingerprint"`
+	FingerprintIsolated bool `json:"fingerprint_isolated"`
 }
 
 // AccountListItem is the compact representation returned by the admin account
@@ -428,6 +431,9 @@ type AccountListItem struct {
 
 	Proxy    *Proxy  `json:"proxy,omitempty"`
 	GroupIDs []int64 `json:"group_ids,omitempty"`
+
+	HasFingerprint      bool `json:"has_fingerprint"`
+	FingerprintIsolated bool `json:"fingerprint_isolated"`
 }
 
 type AccountGroup struct {

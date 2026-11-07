@@ -335,10 +335,8 @@ func (s *GatewayService) buildOAuthMetadataUserID(parsed *ParsedRequest, account
 	if userID == "" && fp != nil {
 		userID = fp.ClientID
 	}
-	if userID == "" {
-		// Fall back to a random, well-formed client id so we can still satisfy
-		// Claude Code OAuth requirements when account metadata is incomplete.
-		userID = generateClientID()
+	if userID == "" && fp != nil {
+		userID = fp.ClientID
 	}
 
 	// session_id 用"会话级稳定种子"派生（账号 + 客户端区分因子 + 首条 user 文本）：
@@ -400,7 +398,7 @@ func (s *GatewayService) applyClaudeCodeOAuthMimicryToBody(
 	normalizeOpts := claudeOAuthNormalizeOptions{}
 
 	if s.identityService != nil && c != nil && c.Request != nil {
-		if fp, err := s.identityService.GetOrCreateFingerprint(ctx, account.ID, c.Request.Header); err == nil && fp != nil {
+		if fp, err := s.identityService.GetOrCreateForAccount(ctx, account, c.Request.Header); err == nil && fp != nil {
 			mimicMPT := false
 			if s.settingService != nil {
 				_, mimicMPT, _ = s.settingService.GetGatewayForwardingSettings(ctx)
@@ -461,7 +459,7 @@ func (s *GatewayService) buildOAuthMetadataUserIDFromBody(
 		userID = fp.ClientID
 	}
 	if userID == "" {
-		userID = generateClientID()
+		return ""
 	}
 
 	// 与 buildOAuthMetadataUserID 一致：用会话级稳定种子，避免整 body 哈希导致

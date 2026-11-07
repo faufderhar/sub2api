@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -134,6 +133,8 @@ func defaultFingerprint() Fingerprint {
 
 // Fingerprint represents account fingerprint data
 type Fingerprint struct {
+	AccountID               int64  `json:"-"`
+	Seed                    string `json:",omitempty"`
 	ClientID                string
 	UserAgent               string
 	StainlessLang           string
@@ -142,13 +143,23 @@ type Fingerprint struct {
 	StainlessArch           string
 	StainlessRuntime        string
 	StainlessRuntimeVersion string
-	UpdatedAt               int64 `json:",omitempty"` // Unix timestamp，用于判断是否需要续期TTL
+	OS                      string    `json:",omitempty"`
+	Generation              int       `json:",omitempty"`
+	Source                  string    `json:",omitempty"`
+	TLSProfileID            int64     `json:",omitempty"`
+	TLSBinding              string    `json:",omitempty"`
+	Conflict                bool      `json:",omitempty"`
+	AccountUUIDChanged      bool      `json:",omitempty"`
+	LastAccountUUID         string    `json:",omitempty"`
+	UpdatedAt               int64     `json:",omitempty"` // Unix timestamp，用于判断是否需要续期TTL
+	UpdatedAtTime           time.Time `json:"-"`
 }
 
 // IdentityCache defines cache operations for identity service
 type IdentityCache interface {
 	GetFingerprint(ctx context.Context, accountID int64) (*Fingerprint, error)
 	SetFingerprint(ctx context.Context, accountID int64, fp *Fingerprint) error
+	DeleteFingerprint(ctx context.Context, accountID int64) error
 	// GetMaskedSessionID 获取固定的会话ID（用于会话ID伪装功能）
 	// 返回的 sessionID 是一个 UUID 格式的字符串
 	// 如果不存在或已过期（15分钟无请求），返回空字符串
@@ -160,7 +171,9 @@ type IdentityCache interface {
 
 // IdentityService 管理OAuth账号的请求身份指纹
 type IdentityService struct {
-	cache IdentityCache
+	cache  IdentityCache
+	store  FingerprintStore
+	tlsIDs func() []int64
 }
 
 // NewIdentityService 创建新的IdentityService
@@ -168,100 +181,45 @@ func NewIdentityService(cache IdentityCache) *IdentityService {
 	return &IdentityService{cache: cache}
 }
 
-// GetOrCreateFingerprint 获取或创建账号的指纹
-// 如果缓存存在，检测user-agent版本，新版本则更新
-// 如果缓存不存在，生成随机ClientID并从请求头创建指纹，然后缓存
+// SetStore attaches the durable fingerprint store (database). Redis remains a cache.
+func (s *IdentityService) SetStore(store FingerprintStore) {
+	if s != nil {
+		s.store = store
+		if store != nil {
+			s.LogIsolatedFingerprints(context.Background())
+		}
+	}
+}
+
+// SetTLSProfileIDs supplies the current TLS profile ID list for hash-sticky selection.
+func (s *IdentityService) SetTLSProfileIDs(fn func() []int64) {
+	if s != nil {
+		s.tlsIDs = fn
+	}
+}
+
+// GetOrCreateFingerprint 获取或创建账号的指纹。
+// R3-FP：身份来自 DB（或在创建事务中写入的记录），不再根据下游请求头生成或合并 OS/arch/ClientID。
+// headers 仅保留兼容旧调用方，不会抬升模板锁定字段。版本只跟随 EffectiveCLIVersion() 下限。
 func (s *IdentityService) GetOrCreateFingerprint(ctx context.Context, accountID int64, headers http.Header) (*Fingerprint, error) {
-	// 入口统一校验：创建与升级两条路径共用，任一路径漏掉都会让畸形 UA 被持久化。
-	clientUA := strings.TrimSpace(headers.Get("User-Agent"))
-	uaAcceptable := isAcceptableFingerprintUserAgent(clientUA)
+	return s.GetOrCreateForAccount(ctx, &Account{ID: accountID}, headers)
+}
 
-	// 尝试从缓存获取指纹
-	cached, err := s.cache.GetFingerprint(ctx, accountID)
-	if err == nil && cached != nil {
-		needWrite := false
-
-		// 只在真正阻止了一次写入时记录，便于定位污染源，同时避免被毒化客户端的
-		// 高频重试刷屏（无重置头的 429 会落到 5 秒兜底冷却，重试相当密集）。
-		if !uaAcceptable && clientUA != "" && isNewerVersion(clientUA, cached.UserAgent) {
-			logger.LegacyPrintf("service.identity",
-				"Rejected fingerprint user-agent for account %d: %q (malformed or implausible version)",
-				accountID, clientUA)
-		}
-
-		if !isAcceptableFingerprintUserAgent(cached.UserAgent) {
-			// 自愈：缓存中已是畸形/哨兵 UA（本次加固之前写入的）。指纹在活跃账号上
-			// 懒续期后近乎永不过期，且系统内没有重置入口——不在读取时纠正，存量被
-			// 毒化的账号就只能靠手工删 Redis 键恢复。
-			poisoned := cached.UserAgent
-			if uaAcceptable {
-				mergeHeadersIntoFingerprint(cached, headers)
-			} else {
-				cached.UserAgent = defaultFingerprint().UserAgent
-			}
-			needWrite = true
-			logger.LegacyPrintf("service.identity",
-				"Replaced malformed cached fingerprint for account %d: %q -> %q",
-				accountID, poisoned, cached.UserAgent)
-		} else {
-			// 客户端送来更新版本时的常规升级：merge 语义 — 仅更新请求中实际携带的字段，
-			// 保留缓存值，避免缺失的头被硬编码默认值覆盖（如新 CLI 版本 + 旧 SDK 默认值的不一致）
-			if uaAcceptable && isNewerVersion(clientUA, cached.UserAgent) {
-				mergeHeadersIntoFingerprint(cached, headers)
-				needWrite = true
-				logger.LegacyPrintf("service.identity", "Updated fingerprint for account %d: %s (merge update)", accountID, clientUA)
-			}
-
-		}
-
-		// 版本下限抬升（floor）：heal 与 healthy 两条缓存命中路径共同的后置条件，与
-		// 上面的客户端常规升级相互独立、二者取更新者。客户端送来更旧版本时
-		// isNewerVersion 不触发，此处仍能把低于 CLICurrentVersion 的存量指纹就地抬到
-		// 下限并持久化，否则升 CLICurrentVersion 对所有已有账号无效，新模型的客户端
-		// 版本闸门（如 Fable 5.1 要求 >= 2.1.251）永远过不去。自愈路径同样必须经过：
-		// 畸形缓存 + 合法但过旧的客户端 UA 首次读取就要落到下限，不能先落库一个
-		// 过旧版本、等下一次读取才纠正。
-		if flooredUA, changed := floorClaudeCLIUserAgentVersion(cached.UserAgent); changed {
-			cached.UserAgent = flooredUA
-			needWrite = true
-			logger.LegacyPrintf("service.identity",
-				"Floored cached fingerprint claude-cli version for account %d: %s", accountID, flooredUA)
-		}
-
-		if !needWrite && time.Since(time.Unix(cached.UpdatedAt, 0)) > 24*time.Hour {
-			// 距上次写入超过24小时，续期TTL
-			needWrite = true
-		}
-
-		if needWrite {
-			cached.UpdatedAt = time.Now().Unix()
-			if err := s.cache.SetFingerprint(ctx, accountID, cached); err != nil {
-				logger.LegacyPrintf("service.identity", "Warning: failed to refresh fingerprint for account %d: %v", accountID, err)
-			}
-		}
-		return cached, nil
+// GetOrCreateForAccount loads the persistent fingerprint for an account.
+func (s *IdentityService) GetOrCreateForAccount(ctx context.Context, account *Account, headers http.Header) (*Fingerprint, error) {
+	_ = headers
+	if account == nil {
+		return nil, fmt.Errorf("account is nil")
 	}
-
-	// 缓存不存在或解析失败，创建新指纹。首次创建同样是持久化写入，
-	// 畸形 UA 在这里落库后就成了账号的长期身份，必须同样拒绝。
-	if !uaAcceptable && clientUA != "" {
-		logger.LegacyPrintf("service.identity",
-			"Rejected fingerprint user-agent for account %d: %q (malformed or implausible version)",
-			accountID, clientUA)
+	fp, err := s.loadPersistentFingerprint(ctx, account)
+	if err != nil {
+		return nil, err
 	}
-	fp := s.createFingerprintFromHeaders(headers)
-
-	// 生成随机ClientID
-	fp.ClientID = generateClientID()
-	fp.UpdatedAt = time.Now().Unix()
-
-	// 保存到缓存（7天TTL，每24小时自动续期）
-	if err := s.cache.SetFingerprint(ctx, accountID, fp); err != nil {
-		logger.LegacyPrintf("service.identity", "Warning: failed to cache fingerprint for account %d: %v", accountID, err)
+	if applyVersionFloorToFingerprint(fp) {
+		s.persistFingerprint(ctx, fp, false)
+		s.writeThroughCache(ctx, fp)
 	}
-
-	logger.LegacyPrintf("service.identity", "Created new fingerprint for account %d with client_id: %s", accountID, fp.ClientID)
-	return fp, nil
+	return cloneFingerprint(fp), nil
 }
 
 // createFingerprintFromHeaders 从请求头创建指纹
@@ -363,7 +321,7 @@ func (s *IdentityService) ApplyFingerprint(req *http.Request, fp *Fingerprint) {
 // 重要：此函数使用 json.RawMessage 保留其他字段的原始字节，
 // 避免重新序列化导致 thinking 块等内容被修改。
 func (s *IdentityService) RewriteUserID(body []byte, accountID int64, accountUUID, cachedClientID, fingerprintUA string) ([]byte, error) {
-	if len(body) == 0 || accountUUID == "" || cachedClientID == "" {
+	if len(body) == 0 || cachedClientID == "" {
 		return body, nil
 	}
 
@@ -505,19 +463,6 @@ func generateRandomUUID() string {
 
 	return fmt.Sprintf("%x-%x-%x-%x-%x",
 		b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
-}
-
-// generateClientID 生成64位十六进制客户端ID（32字节随机数）
-func generateClientID() string {
-	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
-		// 极罕见的情况，使用时间戳+固定值作为fallback
-		logger.LegacyPrintf("service.identity", "Warning: crypto/rand.Read failed: %v, using fallback", err)
-		// 使用SHA256(当前纳秒时间)作为fallback
-		h := sha256.Sum256([]byte(fmt.Sprintf("%d", time.Now().UnixNano())))
-		return hex.EncodeToString(h[:])
-	}
-	return hex.EncodeToString(b)
 }
 
 // generateUUIDFromSeed 从种子生成确定性UUID v4格式字符串

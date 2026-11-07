@@ -26,6 +26,8 @@ func (s *stubIdentityCache) GetFingerprint(_ context.Context, _ int64) (*Fingerp
 	return &clone, nil
 }
 
+func (s *stubIdentityCache) DeleteFingerprint(_ context.Context, _ int64) error { return nil }
+
 func (s *stubIdentityCache) SetFingerprint(_ context.Context, _ int64, fp *Fingerprint) error {
 	s.setCalls++
 	clone := *fp
@@ -140,8 +142,9 @@ func TestGetOrCreateFingerprintStillUpgradesOnValidNewerVersion(t *testing.T) {
 	fp, err := svc.GetOrCreateFingerprint(context.Background(), 1, headersWithUA(newUA))
 
 	require.NoError(t, err)
-	require.Equal(t, newUA, fp.UserAgent)
-	require.Equal(t, 1, cache.setCalls)
+	require.Equal(t, "claude-cli/"+claude.CLICurrentVersion+" (external, cli)", fp.UserAgent,
+		"R3-FP: downstream newer UA must not merge into the locked identity; only the built-in floor applies")
+	require.Equal(t, "cid-1", fp.ClientID)
 }
 
 // 合法 UA 的首次创建路径不受影响。
@@ -153,7 +156,8 @@ func TestGetOrCreateFingerprintAcceptsValidUserAgentOnCreate(t *testing.T) {
 	fp, err := svc.GetOrCreateFingerprint(context.Background(), 1, headersWithUA(ua))
 
 	require.NoError(t, err)
-	require.Equal(t, ua, fp.UserAgent)
+	require.Equal(t, builtUserAgent(), fp.UserAgent,
+		"R3-FP: first create uses the template UA, not the downstream client UA")
 	require.NotEmpty(t, fp.ClientID)
 	require.Equal(t, 1, cache.setCalls)
 }
