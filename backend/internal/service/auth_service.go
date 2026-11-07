@@ -1605,11 +1605,11 @@ func (s *AuthService) RequestPasswordReset(ctx context.Context, email, frontendB
 	}
 
 	if err := s.emailService.SendPasswordResetEmail(ctx, email, siteName, resetURL, firstEmailLocale(locale)); err != nil {
-		logger.LegacyPrintf("service.auth", "[Auth] Failed to send password reset email to %s: %v", email, err)
+		logger.LegacyPrintf("service.auth", "[Auth] Failed to send password reset email to %s: %v", notificationEmailHash(email), err)
 		return nil // Silent success to prevent enumeration
 	}
 
-	logger.LegacyPrintf("service.auth", "[Auth] Password reset email sent to: %s", email)
+	logger.LegacyPrintf("service.auth", "[Auth] Password reset email sent to: %s", notificationEmailHash(email))
 	return nil
 }
 
@@ -1629,11 +1629,11 @@ func (s *AuthService) RequestPasswordResetAsync(ctx context.Context, email, fron
 	}
 
 	if err := s.emailQueueService.EnqueuePasswordReset(email, siteName, resetURL, firstEmailLocale(locale)); err != nil {
-		logger.LegacyPrintf("service.auth", "[Auth] Failed to enqueue password reset email for %s: %v", email, err)
+		logger.LegacyPrintf("service.auth", "[Auth] Failed to enqueue password reset email for %s: %v", notificationEmailHash(email), err)
 		return nil // Silent success to prevent enumeration
 	}
 
-	logger.LegacyPrintf("service.auth", "[Auth] Password reset email enqueued for: %s", email)
+	logger.LegacyPrintf("service.auth", "[Auth] Password reset email enqueued for: %s", notificationEmailHash(email))
 	return nil
 }
 

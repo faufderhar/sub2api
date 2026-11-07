@@ -90,9 +90,9 @@ func (s *EmailQueueService) processTask(workerID int, task EmailTask) {
 		}
 	case TaskTypePasswordReset:
 		if err := s.emailService.SendPasswordResetEmailWithCooldown(ctx, task.Email, task.SiteName, task.ResetURL, task.Locale); err != nil {
-			logger.LegacyPrintf("service.email_queue", "[EmailQueue] Worker %d failed to send password reset to %s: %v", workerID, task.Email, err)
+			logger.LegacyPrintf("service.email_queue", "[EmailQueue] Worker %d failed to send password reset to %s: %v", workerID, notificationEmailHash(task.Email), err)
 		} else {
-			logger.LegacyPrintf("service.email_queue", "[EmailQueue] Worker %d sent password reset to %s", workerID, task.Email)
+			logger.LegacyPrintf("service.email_queue", "[EmailQueue] Worker %d sent password reset to %s", workerID, notificationEmailHash(task.Email))
 		}
 	default:
 		logger.LegacyPrintf("service.email_queue", "[EmailQueue] Worker %d unknown task type: %s", workerID, task.TaskType)
@@ -129,7 +129,7 @@ func (s *EmailQueueService) EnqueuePasswordReset(email, siteName, resetURL strin
 
 	select {
 	case s.taskChan <- task:
-		logger.LegacyPrintf("service.email_queue", "[EmailQueue] Enqueued password reset task for %s", email)
+		logger.LegacyPrintf("service.email_queue", "[EmailQueue] Enqueued password reset task for %s", notificationEmailHash(email))
 		return nil
 	default:
 		return fmt.Errorf("email queue is full")
