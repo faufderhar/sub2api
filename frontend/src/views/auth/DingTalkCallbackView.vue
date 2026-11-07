@@ -246,6 +246,7 @@ import { apiClient } from '@/api/client'
 import { useAuthStore, useAppStore } from '@/stores'
 import {
   exchangePendingOAuthCompletion,
+  readOAuthCompletionCode,
   getOAuthCompletionKind,
   isOAuthLoginCompletion,
   login2FA,
@@ -362,10 +363,6 @@ function readLegacyFragmentLogin(params: URLSearchParams): OAuthTokenResponse | 
 
   const completion: OAuthTokenResponse = {
     access_token: accessToken
-  }
-  const refreshToken = params.get('refresh_token')?.trim() || ''
-  if (refreshToken) {
-    completion.refresh_token = refreshToken
   }
   const expiresIn = Number.parseInt(params.get('expires_in')?.trim() || '', 10)
   if (Number.isFinite(expiresIn) && expiresIn > 0) {
@@ -760,7 +757,7 @@ onMounted(async () => {
   )
 
   try {
-    if (legacyLogin) {
+    if (legacyLogin && !readOAuthCompletionCode()) {
       persistOAuthTokenContext(legacyLogin)
       await authStore.setToken(legacyLogin.access_token)
       clearAllAffiliateReferralCodes()

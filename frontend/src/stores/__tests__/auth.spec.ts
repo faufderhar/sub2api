@@ -210,6 +210,7 @@ describe('useAuthStore', () => {
       store.checkAuth()
 
       expect(store.isAuthenticated).toBe(true)
+      expect(localStorage.getItem('refresh_token')).toBeNull()
     })
 
     it('恢复持久化 pending auth session', () => {

@@ -160,25 +160,29 @@ apiClient.interceptors.response.use(
         })
       }
 
-      // 401: Try to refresh the token if we have a refresh token
+      // 401: Try to refresh via the HttpOnly cookie when this tab has a session.
       // This handles TOKEN_EXPIRED, INVALID_TOKEN, TOKEN_REVOKED, etc.
       if (status === 401 && !originalRequest._retry) {
-        const refreshToken = localStorage.getItem('refresh_token')
+        const hasSession = !!(localStorage.getItem('auth_token') || localStorage.getItem('auth_user'))
         const isAuthEndpoint =
-          url.includes('/auth/login') || url.includes('/auth/register') || url.includes('/auth/refresh')
+          url.includes('/auth/login') ||
+          url.includes('/auth/register') ||
+          url.includes('/auth/refresh') ||
+          url.includes('/auth/logout') ||
+          url.includes('/auth/oauth/pending/exchange')
 
-        // If we have a refresh token and this is not an auth endpoint, try to refresh
-        if (refreshToken && !isAuthEndpoint) {
+        if (hasSession && !isAuthEndpoint) {
           const refreshSessionUser = localStorage.getItem('auth_user')
+          const refreshSessionToken = localStorage.getItem('auth_token')
           originalRequest._retry = true
+          const headers = originalRequest.headers as Record<string, unknown> | undefined
+          const authHeader = headers?.Authorization ?? headers?.authorization
+          const failedAccessToken =
+            typeof authHeader === 'string' && authHeader.startsWith('Bearer ')
+              ? authHeader.slice('Bearer '.length)
+              : null
 
           try {
-            const headers = originalRequest.headers as Record<string, unknown> | undefined
-            const authHeader = headers?.Authorization ?? headers?.authorization
-            const failedAccessToken =
-              typeof authHeader === 'string' && authHeader.startsWith('Bearer ')
-                ? authHeader.slice('Bearer '.length)
-                : null
             const tokens = await refreshAuthTokens({ failedAccessToken })
 
             // Retry the original request with the refreshed token
@@ -190,13 +194,51 @@ apiClient.interceptors.response.use(
             // A stale request must never destroy a session that was logged out or replaced while
             // its refresh was in flight (for example, when another tab signs in as another user).
             const sessionChanged =
-              localStorage.getItem('refresh_token') !== refreshToken ||
-              localStorage.getItem('auth_user') !== refreshSessionUser
+              localStorage.getItem('auth_user') !== refreshSessionUser ||
+              (refreshSessionToken &&
+                localStorage.getItem('auth_token') &&
+                localStorage.getItem('auth_token') !== refreshSessionToken &&
+                localStorage.getItem('auth_token') !== failedAccessToken)
             if (sessionChanged) {
               return Promise.reject({
                 status: 401,
                 code: 'AUTH_SESSION_CHANGED',
                 message: 'Authentication session changed while refreshing.'
+              })
+            }
+
+            const refreshReason = (() => {
+              const err = refreshError as { reason?: unknown; response?: { data?: { reason?: unknown; code?: unknown } } }
+              const raw = err.reason ?? err.response?.data?.reason ?? err.response?.data?.code
+              return typeof raw === 'string' ? raw : ''
+            })()
+            const fatalRefresh =
+              refreshReason === 'REFRESH_TOKEN_MISSING' ||
+              refreshReason === 'REFRESH_TOKEN_INVALID' ||
+              refreshReason === 'REFRESH_TOKEN_EXPIRED' ||
+              refreshReason === 'REFRESH_TOKEN_REUSED' ||
+              refreshReason === 'CSRF_ORIGIN_REJECTED'
+
+            if (fatalRefresh) {
+              localStorage.removeItem('auth_token')
+              localStorage.removeItem('refresh_token')
+              localStorage.removeItem('auth_user')
+              localStorage.removeItem('token_expires_at')
+              sessionStorage.setItem('auth_expired', '1')
+              if (!window.location.pathname.includes('/login')) {
+                window.location.href = '/login'
+              }
+              const refreshStatus = axios.isAxiosError(refreshError)
+                ? (refreshError.response?.status ?? 401)
+                : 401
+              const refreshMessage = axios.isAxiosError(refreshError)
+                ? (refreshError.response?.data?.message || refreshError.message)
+                : ((refreshError as { message?: string }).message || 'Session expired. Please log in again.')
+              return Promise.reject({
+                status: refreshStatus,
+                code: refreshReason,
+                reason: refreshReason,
+                message: refreshMessage
               })
             }
 

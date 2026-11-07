@@ -78,8 +78,9 @@ export function setAuthToken(token: string): void {
 /**
  * Store refresh token in localStorage
  */
-export function setRefreshToken(token: string): void {
-  localStorage.setItem('refresh_token', token)
+export function setRefreshToken(_token?: string): void {
+  // R3-COOKIE: refresh lives in an HttpOnly cookie; never persist it in JS.
+  localStorage.removeItem('refresh_token')
 }
 
 /**
@@ -102,7 +103,7 @@ export function getAuthToken(): string | null {
  * Get refresh token from localStorage
  */
 export function getRefreshToken(): string | null {
-  return localStorage.getItem('refresh_token')
+  return null
 }
 
 /**
@@ -134,9 +135,7 @@ export async function login(credentials: LoginRequest): Promise<LoginResponse> {
   // Only store token if 2FA is not required
   if (!isTotp2FARequired(data)) {
     setAuthToken(data.access_token)
-    if (data.refresh_token) {
-      setRefreshToken(data.refresh_token)
-    }
+    localStorage.removeItem('refresh_token')
     if (data.expires_in) {
       setTokenExpiresAt(data.expires_in)
     }
@@ -156,9 +155,7 @@ export async function login2FA(request: TotpLogin2FARequest): Promise<AuthRespon
 
   // Store token and user data
   setAuthToken(data.access_token)
-  if (data.refresh_token) {
-    setRefreshToken(data.refresh_token)
-  }
+  localStorage.removeItem('refresh_token')
   if (data.expires_in) {
     setTokenExpiresAt(data.expires_in)
   }
@@ -177,9 +174,7 @@ export async function register(userData: RegisterRequest): Promise<AuthResponse>
 
   // Store token and user data
   setAuthToken(data.access_token)
-  if (data.refresh_token) {
-    setRefreshToken(data.refresh_token)
-  }
+  localStorage.removeItem('refresh_token')
   if (data.expires_in) {
     setTokenExpiresAt(data.expires_in)
   }
@@ -202,15 +197,11 @@ export async function getCurrentUser() {
  * Optionally revokes the refresh token on the server
  */
 export async function logout(): Promise<void> {
-  const refreshToken = getRefreshToken()
-
-  // Try to revoke the refresh token on the server
-  if (refreshToken) {
-    try {
-      await apiClient.post('/auth/logout', { refresh_token: refreshToken })
-    } catch {
-      // Ignore errors - we still want to clear local state
-    }
+  try {
+    // Cookie is sent automatically; body must not carry a refresh secret.
+    await apiClient.post('/auth/logout', {})
+  } catch {
+    // Ignore errors - we still want to clear local state
   }
 
   clearAuthToken()
@@ -255,18 +246,29 @@ export type OAuthCompletionKind = 'login' | 'bind'
 export interface OAuthAdoptionDecision {
   adoptDisplayName?: boolean
   adoptAvatar?: boolean
+  completionCode?: string
+}
+
+export function readOAuthCompletionCode(
+  search: string = typeof window !== 'undefined' ? window.location.search : ''
+): string {
+  return new URLSearchParams(search).get('completion_code')?.trim() || ''
 }
 
 function serializeOAuthAdoptionDecision(
   decision?: OAuthAdoptionDecision
-): Record<string, boolean> {
-  const payload: Record<string, boolean> = {}
+): Record<string, boolean | string> {
+  const payload: Record<string, boolean | string> = {}
 
   if (typeof decision?.adoptDisplayName === 'boolean') {
     payload.adopt_display_name = decision.adoptDisplayName
   }
   if (typeof decision?.adoptAvatar === 'boolean') {
     payload.adopt_avatar = decision.adoptAvatar
+  }
+  const completionCode = (decision?.completionCode || readOAuthCompletionCode()).trim()
+  if (completionCode) {
+    payload.completion_code = completionCode
   }
 
   return payload
@@ -306,9 +308,7 @@ export function hasPendingOAuthSuggestedProfile(
 }
 
 export function persistOAuthTokenContext(tokens: Partial<OAuthTokenResponse>): void {
-  if (tokens.refresh_token) {
-    setRefreshToken(tokens.refresh_token)
-  }
+  localStorage.removeItem('refresh_token')
   if (tokens.expires_in) {
     setTokenExpiresAt(tokens.expires_in)
   }

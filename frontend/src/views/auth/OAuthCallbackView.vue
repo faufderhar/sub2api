@@ -155,6 +155,7 @@ import { apiClient } from '@/api/client'
 import { buildApiUrl } from '@/api/url'
 import {
   exchangePendingOAuthCompletion,
+  readOAuthCompletionCode,
   persistOAuthTokenContext,
   type OAuthTokenResponse
 } from '@/api/auth'
@@ -230,8 +231,6 @@ function readTokenResponse(params: URLSearchParams): OAuthTokenResponse | null {
   if (!accessToken) return null
 
   const response: OAuthTokenResponse = { access_token: accessToken }
-  const refreshToken = params.get('refresh_token')?.trim() || ''
-  if (refreshToken) response.refresh_token = refreshToken
   const expiresIn = Number.parseInt(params.get('expires_in')?.trim() || '', 10)
   if (Number.isFinite(expiresIn) && expiresIn > 0) response.expires_in = expiresIn
   const tokenType = params.get('token_type')?.trim() || ''
@@ -364,6 +363,10 @@ async function handleSubmitRegistration() {
 }
 
 onMounted(async () => {
+  if (readOAuthCompletionCode()) {
+    await resumePendingEmailOAuth()
+    return
+  }
   const params = parseFragmentParams()
   const tokenResponse = readTokenResponse(params)
   const fragmentError = params.get('error') || ''

@@ -14,7 +14,7 @@ const PEER_REFRESH_POLL_MS = 25
 
 export interface RefreshTokenResponse {
   access_token: string
-  refresh_token: string
+  refresh_token?: string
   expires_in: number
   token_type: string
 }
@@ -26,7 +26,6 @@ export interface RefreshAuthTokensOptions {
 
 interface AuthSnapshot {
   accessToken: string | null
-  refreshToken: string
   expiresAt: number
   userID: number | null
 }
@@ -48,14 +47,8 @@ function getStoredUserID(): number | null {
 }
 
 function readAuthSnapshot(): AuthSnapshot {
-  const refreshToken = localStorage.getItem(REFRESH_TOKEN_KEY)
-  if (!refreshToken) {
-    throw new Error('No refresh token available')
-  }
-
   return {
     accessToken: localStorage.getItem(AUTH_TOKEN_KEY),
-    refreshToken,
     expiresAt: Number(localStorage.getItem(TOKEN_EXPIRES_AT_KEY)),
     userID: getStoredUserID()
   }
@@ -63,12 +56,10 @@ function readAuthSnapshot(): AuthSnapshot {
 
 function readStoredTokenPair(snapshot: AuthSnapshot): RefreshTokenResponse | null {
   const accessToken = localStorage.getItem(AUTH_TOKEN_KEY)
-  const refreshToken = localStorage.getItem(REFRESH_TOKEN_KEY)
   const expiresAt = Number(localStorage.getItem(TOKEN_EXPIRES_AT_KEY))
 
   if (
     !accessToken ||
-    !refreshToken ||
     !Number.isFinite(expiresAt) ||
     expiresAt <= Date.now() ||
     getStoredUserID() !== snapshot.userID
@@ -78,7 +69,6 @@ function readStoredTokenPair(snapshot: AuthSnapshot): RefreshTokenResponse | nul
 
   return {
     access_token: accessToken,
-    refresh_token: refreshToken,
     expires_in: Math.max(1, Math.ceil((expiresAt - Date.now()) / 1000)),
     token_type: 'Bearer'
   }
@@ -93,7 +83,7 @@ function readPeerRefreshResult(
     return null
   }
 
-  if (storedPair.refresh_token !== snapshot.refreshToken) {
+  if (storedPair.access_token !== snapshot.accessToken) {
     return storedPair
   }
 
@@ -127,8 +117,8 @@ async function waitForPeerRefresh(
 function persistTokenPair(tokens: RefreshTokenResponse): void {
   localStorage.setItem(AUTH_TOKEN_KEY, tokens.access_token)
   localStorage.setItem(TOKEN_EXPIRES_AT_KEY, String(Date.now() + tokens.expires_in * 1000))
-  // The rotating refresh token is written last so other tabs can treat its change as a commit marker.
-  localStorage.setItem(REFRESH_TOKEN_KEY, tokens.refresh_token)
+  // R3-COOKIE: never persist the refresh secret; drop any leftover pre-upgrade value.
+  localStorage.removeItem(REFRESH_TOKEN_KEY)
 }
 
 async function requestTokenPair(
@@ -136,26 +126,24 @@ async function requestTokenPair(
   failedAccessToken?: string | null,
   mayHaveUncoordinatedPeer = false
 ): Promise<RefreshTokenResponse> {
-  // If this request loses a one-time-token race, the winning peer can legitimately take as long
-  // as our own HTTP timeout to publish its replacement token. Keep the recovery window tied to
-  // that timeout instead of an arbitrary short delay.
   const peerRefreshDeadline = Date.now() + TOKEN_REFRESH_TIMEOUT_MS + PEER_REFRESH_GRACE_MS
 
   try {
     const response = await axios.post<ApiResponse<RefreshTokenResponse>>(
       `${getAPIBaseURL()}/auth/refresh`,
-      { refresh_token: snapshot.refreshToken },
-      { headers: { 'Content-Type': 'application/json' }, timeout: TOKEN_REFRESH_TIMEOUT_MS }
+      {},
+      {
+        headers: { 'Content-Type': 'application/json' },
+        timeout: TOKEN_REFRESH_TIMEOUT_MS,
+        withCredentials: true
+      }
     )
     const payload = response.data
     if (payload.code !== 0 || !payload.data) {
       throw new Error(payload.message || 'Token refresh failed')
     }
 
-    if (
-      localStorage.getItem(REFRESH_TOKEN_KEY) !== snapshot.refreshToken ||
-      getStoredUserID() !== snapshot.userID
-    ) {
+    if (getStoredUserID() !== snapshot.userID || !localStorage.getItem(AUTH_TOKEN_KEY)) {
       const peerResult = readPeerRefreshResult(snapshot, failedAccessToken)
       if (peerResult) {
         return peerResult
@@ -163,13 +151,21 @@ async function requestTokenPair(
       throw new Error('Session changed during token refresh')
     }
 
+    const currentAccess = localStorage.getItem(AUTH_TOKEN_KEY)
+    if (currentAccess && currentAccess !== snapshot.accessToken) {
+      const peerResult = readPeerRefreshResult(snapshot, failedAccessToken)
+      if (peerResult) {
+        return peerResult
+      }
+    }
+
     persistTokenPair(payload.data)
-    return payload.data
+    return {
+      access_token: payload.data.access_token,
+      expires_in: payload.data.expires_in,
+      token_type: payload.data.token_type || 'Bearer'
+    }
   } catch (error) {
-    // A peer tab may have rotated the one-time refresh token while this request was in flight.
-    // A 4xx response can arrive quickly while the winning peer's response is still in flight, so
-    // wait through the shared request deadline before treating the session as expired. Transient
-    // non-4xx failures retain the short reconciliation window.
     const responseStatus = (error as { response?: { status?: unknown } }).response?.status
     const isTokenRejection =
       typeof responseStatus === 'number' && responseStatus >= 400 && responseStatus < 500
@@ -205,10 +201,12 @@ async function runRefresh(options: RefreshAuthTokensOptions): Promise<RefreshTok
 }
 
 /**
- * Refresh and persist the browser session.
+ * Refresh and persist the browser session via the HttpOnly refresh cookie.
  *
  * Calls in the same document share one promise. Web Locks serialize refreshes across tabs, while
- * the token snapshot check adopts a peer's newly rotated token instead of logging the user out.
+ * a newly written access token from a peer tab is adopted instead of logging the user out.
+ * Backend reuses the rotated cookie for 10 seconds across tabs; after that REFRESH_TOKEN_REUSED
+ * must send the user back to login.
  */
 export function refreshAuthTokens(
   options: RefreshAuthTokensOptions = {}

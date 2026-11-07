@@ -30,6 +30,24 @@ describe('oauth adoption auth api', () => {
     })
   })
 
+  it('forwards completion_code from the callback query when exchanging pending oauth completion', async () => {
+    const { exchangePendingOAuthCompletion } = await import('@/api/auth')
+    const originalSearch = window.location.search
+    window.history.replaceState({}, '', '/auth/oauth/callback?completion_code=one-time-code&redirect=/dashboard')
+
+    await exchangePendingOAuthCompletion({
+      adoptDisplayName: true,
+      adoptAvatar: false
+    })
+
+    expect(post).toHaveBeenCalledWith('/auth/oauth/pending/exchange', {
+      adopt_display_name: true,
+      adopt_avatar: false,
+      completion_code: 'one-time-code'
+    })
+    window.history.replaceState({}, '', originalSearch || '/')
+  })
+
   it('posts bind-login decisions when finalizing pending oauth bind flow', async () => {
     const { completePendingOAuthBindLogin } = await import('@/api/auth')
 
