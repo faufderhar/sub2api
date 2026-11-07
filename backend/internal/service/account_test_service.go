@@ -348,7 +348,9 @@ func (s *AccountTestService) applyClaudeIdentityHeaders(ctx context.Context, req
 	if req == nil {
 		return
 	}
-	s.applyClaudeIdentityHeaders(ctx, req, account)
+	for key, value := range claude.DefaultHeaders() {
+		req.Header.Set(key, value)
+	}
 	if fp := s.accountFingerprint(ctx, account); fp != nil && s.identityService != nil {
 		s.identityService.ApplyFingerprint(req, fp)
 	}
