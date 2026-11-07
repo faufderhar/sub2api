@@ -568,7 +568,7 @@ Additional security-related options are available in `config.yaml`:
 - `security.url_allowlist` for upstream/pricing/CRS host allowlists
 - `security.url_allowlist.enabled` to disable URL validation (use with caution)
 - `security.url_allowlist.allow_insecure_http` to allow HTTP URLs when validation is disabled
-- `security.url_allowlist.allow_private_hosts` to allow private/local IP addresses
+- `security.url_allowlist.allow_private_hosts` to allow private/local IP addresses (new installs default to `false`; upgrades keep the existing file/env value)
 - `security.response_headers.enabled` to enable configurable response header filtering (disabled uses default allowlist)
 - `security.csp` to control Content-Security-Policy headers
 - `billing.circuit_breaker` to fail closed on billing errors

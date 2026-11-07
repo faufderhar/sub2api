@@ -533,6 +533,11 @@ func writeConfigFile(cfg *SetupConfig) error {
 			RateMultiplier  float64 `yaml:"rate_multiplier"`
 		} `yaml:"default"`
 		Timezone string `yaml:"timezone"`
+		Security struct {
+			URLAllowlist struct {
+				AllowPrivateHosts bool `yaml:"allow_private_hosts"`
+			} `yaml:"url_allowlist"`
+		} `yaml:"security"`
 	}{
 		Server:   cfg.Server,
 		Database: cfg.Database,

@@ -244,8 +244,12 @@ closed.
 
 ## Outbound requests and private addresses (M-3)
 
-`security.url_allowlist.allow_private_hosts` keeps its default `true`. When it is
-set to `false`:
+`security.url_allowlist.allow_private_hosts` defaults to `false` on new installs.
+Existing deployments keep the value already set in the config file or
+`SECURITY_URL_ALLOWLIST_ALLOW_PRIVATE_HOSTS`. If an older config file omits the
+key and the environment variable is unset, the previous implicit default
+(`true`) is preserved so upgrades do not rewrite operator intent. When it is
+`false`:
 
 - URLs are checked when configured (as before), **and** the IP actually dialed
   is checked at connect time for direct connections (`net.Dialer.Control`), so

@@ -568,7 +568,7 @@ default:
 - `security.url_allowlist` - 上流/価格/CRS ホストの許可リスト
 - `security.url_allowlist.enabled` - URL バリデーションの無効化（注意して使用）
 - `security.url_allowlist.allow_insecure_http` - バリデーション無効時に HTTP URL を許可
-- `security.url_allowlist.allow_private_hosts` - プライベート/ローカル IP アドレスを許可
+- `security.url_allowlist.allow_private_hosts` - プライベート/ローカル IP アドレスを許可（新規インストールのデフォルトは `false`。アップグレード時は既存の設定値を維持）
 - `security.response_headers.enabled` - 設定可能なレスポンスヘッダーフィルタリングを有効化（無効時はデフォルトの許可リストを使用）
 - `security.csp` - Content-Security-Policy ヘッダーの制御
 - `billing.circuit_breaker` - 課金エラー時にフェイルクローズ
