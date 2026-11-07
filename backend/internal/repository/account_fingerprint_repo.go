@@ -119,7 +119,7 @@ SELECT account_id, seed, client_id, generation, source, os, arch, runtime, runti
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		fp, err := scanFingerprint(rows)
 		if err != nil {
@@ -135,7 +135,7 @@ func (r *accountFingerprintRepository) ListConflictAccountIDs(ctx context.Contex
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var ids []int64
 	for rows.Next() {
 		var id int64

@@ -23,7 +23,9 @@ func TestSecretFieldCryptoCredentialsRoundTripAndReuse(t *testing.T) {
 	plain := map[string]any{"api_key": "sk-secret", "base_url": "https://api.example", "refresh_token": "rt-1"}
 	stored, err := crypto.PrepareCredentials(42, plain, nil)
 	require.NoError(t, err)
-	require.True(t, fieldcrypto.IsEnvelope(stored["api_key"].(string)))
+	apiKey, ok := stored["api_key"].(string)
+	require.True(t, ok, "stored api_key should be a string envelope")
+	require.True(t, fieldcrypto.IsEnvelope(apiKey))
 	require.Equal(t, "https://api.example", stored["base_url"])
 	require.False(t, strings.Contains(mustJSONSecret(stored), "sk-secret"))
 
@@ -77,7 +79,9 @@ func TestSecretFieldCryptoBackupFingerprintAndCredentials(t *testing.T) {
 
 	backupCreds, err := crypto.EncryptBackupCredentials(map[string]any{"api_key": "sk-backup", "email": "a@b.c"})
 	require.NoError(t, err)
-	require.True(t, fieldcrypto.IsEnvelope(backupCreds["api_key"].(string)))
+	backupKey, ok := backupCreds["api_key"].(string)
+	require.True(t, ok, "backup api_key should be a string envelope")
+	require.True(t, fieldcrypto.IsEnvelope(backupKey))
 	require.Equal(t, "a@b.c", backupCreds["email"])
 	plain, err := crypto.DecryptBackupCredentials(backupCreds)
 	require.NoError(t, err)

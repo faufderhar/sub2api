@@ -114,16 +114,6 @@ func generateFingerprintSecret() (string, error) {
 	return hex.EncodeToString(buf), nil
 }
 
-func generateClientID() string {
-	// Legacy helper used by a few OAuth body fallbacks. New code must use
-	// generateFingerprintSecret and fail closed on RNG errors.
-	id, err := generateFingerprintSecret()
-	if err != nil {
-		return ""
-	}
-	return id
-}
-
 func isHex64(s string) bool {
 	if len(s) != 64 {
 		return false

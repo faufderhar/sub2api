@@ -326,10 +326,6 @@ func (lb *DefaultLoadBalancer) buildSelection(selected *dbent.PaymentProviderIns
 // transitional compatibility shim for pre-plaintext records. Remove it (and
 // the encryptionKey field + the Decrypt import) after a few releases once all
 // live deployments have re-saved their provider configs through the UI.
-func (lb *DefaultLoadBalancer) decryptConfig(stored string) (map[string]string, error) {
-	return lb.decryptConfigFor(0, stored)
-}
-
 func (lb *DefaultLoadBalancer) decryptConfigFor(instanceID int64, stored string) (map[string]string, error) {
 	if stored == "" {
 		return nil, nil

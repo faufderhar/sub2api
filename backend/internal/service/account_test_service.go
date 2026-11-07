@@ -306,13 +306,6 @@ func (s *AccountTestService) validateUpstreamBaseURL(raw string) (string, error)
 	return normalized, nil
 }
 
-// generateSessionString generates a Claude Code style session string.
-// The output format is determined by the UA version in claude.DefaultHeaders(),
-// ensuring consistency between the user_id format and the UA sent to upstream.
-func generateSessionString() (string, error) {
-	return generateSessionStringFromFingerprint(nil)
-}
-
 func generateSessionStringFromFingerprint(fp *Fingerprint) (string, error) {
 	var hex64 string
 	if fp != nil && fp.ClientID != "" {
@@ -354,11 +347,6 @@ func (s *AccountTestService) applyClaudeIdentityHeaders(ctx context.Context, req
 	if fp := s.accountFingerprint(ctx, account); fp != nil && s.identityService != nil {
 		s.identityService.ApplyFingerprint(req, fp)
 	}
-}
-
-// createTestPayload creates a Claude Code style test request payload
-func createTestPayload(modelID string) (map[string]any, error) {
-	return createTestPayloadWithFingerprint(modelID, nil)
 }
 
 func createTestPayloadWithFingerprint(modelID string, fp *Fingerprint) (map[string]any, error) {

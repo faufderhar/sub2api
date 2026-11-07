@@ -32,9 +32,9 @@ func (h *AccountHandler) attachFingerprintListFlags(ctx context.Context, account
 		if result[i].Account == nil {
 			continue
 		}
-		flag := flags[result[i].Account.ID]
-		result[i].Account.HasFingerprint = flag.HasFingerprint
-		result[i].Account.FingerprintIsolated = flag.FingerprintIsolated
+		flag := flags[result[i].ID]
+		result[i].HasFingerprint = flag.HasFingerprint
+		result[i].FingerprintIsolated = flag.FingerprintIsolated
 	}
 }
 

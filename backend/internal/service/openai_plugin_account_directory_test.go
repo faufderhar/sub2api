@@ -125,10 +125,10 @@ func TestAccountReadableSnapshot_DenylistTripwire(t *testing.T) {
 	// The raw Credentials blob must never serialize; Extra and the proxy ARE released.
 	acct := &Account{
 		ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive,
-		Credentials:            map[string]any{"access_token": "AT", "refresh_token": "LEAK-REFRESH"},
-		StoredCredentialsJSON:  `{"refresh_token":"LEAK-STORED-CIPHER"}`,
-		Extra:                  map[string]any{"opaque": "extra-released"},
-		Proxy:       &Proxy{Host: "host", Port: 1, Username: "user", Password: "pw-released"},
+		Credentials:           map[string]any{"access_token": "AT", "refresh_token": "LEAK-REFRESH"},
+		StoredCredentialsJSON: `{"refresh_token":"LEAK-STORED-CIPHER"}`,
+		Extra:                 map[string]any{"opaque": "extra-released"},
+		Proxy:                 &Proxy{Host: "host", Port: 1, Username: "user", Password: "pw-released"},
 	}
 	snap := accountReadableSnapshotJSON(acct)
 	require.NotNil(t, snap)

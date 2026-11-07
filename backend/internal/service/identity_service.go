@@ -222,65 +222,6 @@ func (s *IdentityService) GetOrCreateForAccount(ctx context.Context, account *Ac
 	return cloneFingerprint(fp), nil
 }
 
-// createFingerprintFromHeaders 从请求头创建指纹
-func (s *IdentityService) createFingerprintFromHeaders(headers http.Header) *Fingerprint {
-	fp := &Fingerprint{}
-
-	// 获取User-Agent：只接受形态合法且版本合理的值，否则回退默认指纹。
-	// 首次创建同样是持久化写入，必须与升级路径共用同一套校验。
-	if ua := strings.TrimSpace(headers.Get("User-Agent")); isAcceptableFingerprintUserAgent(ua) {
-		// 首次创建与缓存命中路径共用同一个版本下限：合法但过旧的 claude-cli UA
-		// 落库时同样不能低于运行期生效版本（EffectiveCLIVersion），否则新账号一开始就带着过旧的持久身份。
-		fp.UserAgent, _ = floorClaudeCLIUserAgentVersion(ua)
-	} else {
-		fp.UserAgent = defaultFingerprint().UserAgent
-	}
-
-	// 获取x-stainless-*头，如果没有则使用默认值
-	df := defaultFingerprint()
-	fp.StainlessLang = getHeaderOrDefault(headers, "X-Stainless-Lang", df.StainlessLang)
-	fp.StainlessPackageVersion = getHeaderOrDefault(headers, "X-Stainless-Package-Version", df.StainlessPackageVersion)
-	fp.StainlessOS = getHeaderOrDefault(headers, "X-Stainless-OS", df.StainlessOS)
-	fp.StainlessArch = getHeaderOrDefault(headers, "X-Stainless-Arch", df.StainlessArch)
-	fp.StainlessRuntime = getHeaderOrDefault(headers, "X-Stainless-Runtime", df.StainlessRuntime)
-	fp.StainlessRuntimeVersion = getHeaderOrDefault(headers, "X-Stainless-Runtime-Version", df.StainlessRuntimeVersion)
-
-	return fp
-}
-
-// mergeHeadersIntoFingerprint 将请求头中实际存在的字段合并到现有指纹中（用于版本升级场景）
-// 关键语义：请求中有的字段 → 用新值覆盖；缺失的头 → 保留缓存中的已有值
-// 与 createFingerprintFromHeaders 的区别：后者用于首次创建，缺失头回退到 defaultFingerprint；
-// 本函数用于升级更新，缺失头保留缓存值，避免将已知的真实值退化为硬编码默认值
-func mergeHeadersIntoFingerprint(fp *Fingerprint, headers http.Header) {
-	// User-Agent：版本升级的触发条件，一定存在
-	if ua := headers.Get("User-Agent"); ua != "" {
-		fp.UserAgent = ua
-	}
-	// X-Stainless-* 头：仅在请求中实际携带时才更新，否则保留缓存值
-	mergeHeader(headers, "X-Stainless-Lang", &fp.StainlessLang)
-	mergeHeader(headers, "X-Stainless-Package-Version", &fp.StainlessPackageVersion)
-	mergeHeader(headers, "X-Stainless-OS", &fp.StainlessOS)
-	mergeHeader(headers, "X-Stainless-Arch", &fp.StainlessArch)
-	mergeHeader(headers, "X-Stainless-Runtime", &fp.StainlessRuntime)
-	mergeHeader(headers, "X-Stainless-Runtime-Version", &fp.StainlessRuntimeVersion)
-}
-
-// mergeHeader 如果请求头中存在该字段则更新目标值，否则保留原值
-func mergeHeader(headers http.Header, key string, target *string) {
-	if v := headers.Get(key); v != "" {
-		*target = v
-	}
-}
-
-// getHeaderOrDefault 获取header值，如果不存在则返回默认值
-func getHeaderOrDefault(headers http.Header, key, defaultValue string) string {
-	if v := headers.Get(key); v != "" {
-		return v
-	}
-	return defaultValue
-}
-
 // ApplyFingerprint 将指纹应用到请求头（覆盖原有的x-stainless-*头）
 // 使用 setHeaderRaw 保持原始大小写（如 X-Stainless-OS 而非 X-Stainless-Os）
 func (s *IdentityService) ApplyFingerprint(req *http.Request, fp *Fingerprint) {

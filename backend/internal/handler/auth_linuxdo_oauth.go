@@ -820,35 +820,6 @@ func redirectOAuthError(c *gin.Context, frontendCallback string, code string, me
 	redirectWithFragment(c, frontendCallback, fragment)
 }
 
-func redirectOAuthTokenPair(c *gin.Context, frontendCallback string, tokenPair *service.TokenPair, redirectTo string) {
-	fragment := url.Values{}
-	if tokenPair != nil {
-		fragment.Set("access_token", truncateFragmentValue(tokenPair.AccessToken))
-		fragment.Set("refresh_token", truncateFragmentValue(tokenPair.RefreshToken))
-		fragment.Set("expires_in", strconv.Itoa(tokenPair.ExpiresIn))
-		fragment.Set("token_type", "Bearer")
-	}
-	if redirect := strings.TrimSpace(redirectTo); redirect != "" {
-		originalRedirect := redirect
-		for range 2 {
-			decoded, err := url.QueryUnescape(redirect)
-			if err != nil || decoded == redirect {
-				break
-			}
-			redirect = decoded
-		}
-		if redirect != originalRedirect {
-			if sanitized := sanitizeFrontendRedirectPath(redirect); sanitized != "" {
-				redirect = sanitized
-			} else {
-				redirect = originalRedirect
-			}
-		}
-		fragment.Set("redirect", truncateFragmentValue(redirect))
-	}
-	redirectWithFragment(c, frontendCallback, fragment)
-}
-
 func redirectWithFragment(c *gin.Context, frontendCallback string, fragment url.Values) {
 	u, err := url.Parse(frontendCallback)
 	if err != nil {

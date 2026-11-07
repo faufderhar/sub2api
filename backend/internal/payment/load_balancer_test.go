@@ -547,12 +547,12 @@ func TestDecryptConfig_PlaintextAndLegacyCompat(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			lb := NewDefaultLoadBalancer(nil, tt.key)
-			got, err := lb.decryptConfig(tt.stored)
+			got, err := lb.decryptConfigFor(0, tt.stored)
 			if err != nil {
-				t.Fatalf("decryptConfig unexpected error: %v", err)
+				t.Fatalf("decryptConfigFor unexpected error: %v", err)
 			}
 			if !stringMapEqual(got, tt.want) {
-				t.Fatalf("decryptConfig = %v, want %v", got, tt.want)
+				t.Fatalf("decryptConfigFor = %v, want %v", got, tt.want)
 			}
 		})
 	}

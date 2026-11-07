@@ -213,10 +213,6 @@ func seedAccount(t *testing.T, ident *IdentityService, acc *Account) *Fingerprin
 	return fp
 }
 
-func identityProjection(fp *Fingerprint) (ua, os, arch, runtime, runtimeV, clientID string) {
-	return fp.UserAgent, fp.StainlessOS, fp.StainlessArch, fp.StainlessRuntime, fp.StainlessRuntimeVersion, fp.ClientID
-}
-
 func captureMessages(t *testing.T, svc *GatewayService, account *Account, headers http.Header, body []byte, stream, mimic bool) capturedUpstream {
 	t.Helper()
 	c := newAuditGinCtx(body, headers)
@@ -515,7 +511,7 @@ func TestAudit3FP_LocalTLSHelloStable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 	go func() {
 		for {
 			conn, err := ln.Accept()
@@ -530,7 +526,7 @@ func TestAudit3FP_LocalTLSHelloStable(t *testing.T) {
 	}()
 
 	dial := func() {
-		conn, err := tls.Dial("tcp", ln.Addr().String(), &tls.Config{InsecureSkipVerify: true, ServerName: "fp-test"})
+		conn, err := tls.Dial("tcp", ln.Addr().String(), &tls.Config{InsecureSkipVerify: true, ServerName: "fp-test"}) // #nosec G402 -- loopback test listener
 		if err != nil {
 			t.Fatalf("dial: %v", err)
 		}

@@ -296,9 +296,8 @@ func (s *IdentityService) RegenerateFingerprint(ctx context.Context, account *Ac
 		next.TLSBinding = FingerprintTLSBindingExplicit
 		next.TLSProfileID = current.TLSProfileID
 	}
-	ok := true
 	if s.store != nil {
-		ok, err = s.store.CompareAndSwapGeneration(ctx, account.ID, expectedGeneration, next)
+		ok, err := s.store.CompareAndSwapGeneration(ctx, account.ID, expectedGeneration, next)
 		if err != nil {
 			return nil, err
 		}
