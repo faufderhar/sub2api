@@ -504,7 +504,9 @@ func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Con
 	if account.IsOAuth() && s.identityService != nil {
 		fp, err := s.identityService.GetOrCreateForAccount(ctx, account, clientHeaders)
 		if err == nil {
-			ctFingerprint = fp
+			if ctEnableFP {
+				ctFingerprint = fp
+			}
 			if !ctEnableMPT && fp != nil && fp.ClientID != "" {
 				accountUUID := account.GetExtraString("account_uuid")
 				if newBody, err := s.identityService.RewriteUserIDWithMasking(ctx, body, account, accountUUID, fp.ClientID, fp.UserAgent); err == nil && len(newBody) > 0 {
@@ -515,17 +517,13 @@ func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Con
 	}
 
 	// Disabled fingerprint unification does not disable forced mimicry headers.
-	var billingFingerprint *Fingerprint
-	if ctEnableFP {
-		billingFingerprint = ctFingerprint
-	}
 	// 一致性铁律：同一次请求内只取一次 mimic UA，billing cc_version 与出站
 	// User-Agent 头共用这一个字符串（同 buildUpstreamRequest）。
 	ctMimicUserAgent := claude.DefaultUserAgent()
 	if ctFingerprint != nil && ctFingerprint.UserAgent != "" {
 		ctMimicUserAgent = ctFingerprint.UserAgent
 	}
-	if billingUA := effectiveBillingUserAgent(ctMimicUserAgent, tokenType, mimicClaudeCode, billingFingerprint); billingUA != "" {
+	if billingUA := effectiveBillingUserAgent(ctMimicUserAgent, tokenType, mimicClaudeCode, ctFingerprint); billingUA != "" {
 		body = syncBillingHeaderVersion(body, billingUA)
 	}
 
