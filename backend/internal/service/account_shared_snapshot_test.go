@@ -3,6 +3,7 @@
 package service
 
 import (
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -79,4 +80,34 @@ func TestAccountPrepareSharedSnapshot_NilAccountAndNoMapping(t *testing.T) {
 	replica := *master
 	require.Nil(t, replica.GetModelMapping())
 	require.Equal(t, "claude-sonnet", replica.GetMappedModel("claude-sonnet"))
+}
+
+func TestGetModelMappingReturnsIndependentCopy(t *testing.T) {
+	acc := &Account{
+		Platform:    PlatformAnthropic,
+		Credentials: map[string]any{"model_mapping": map[string]any{"claude-sonnet": "sonnet-a"}},
+	}
+	got := acc.GetModelMapping()
+	got["claude-sonnet"] = "mutated"
+	require.Equal(t, "sonnet-a", acc.GetModelMapping()["claude-sonnet"])
+}
+
+func TestGetModelMappingConcurrentSafe(t *testing.T) {
+	acc := &Account{
+		Platform:    PlatformAnthropic,
+		Credentials: map[string]any{"model_mapping": map[string]any{"claude-sonnet": "sonnet-a"}},
+	}
+	var wg sync.WaitGroup
+	for i := 0; i < 16; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 200; j++ {
+				mapping := acc.GetModelMapping()
+				require.Equal(t, "sonnet-a", mapping["claude-sonnet"])
+				require.Equal(t, "sonnet-a", acc.GetMappedModel("claude-sonnet"))
+			}
+		}()
+	}
+	wg.Wait()
 }

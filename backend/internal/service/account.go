@@ -11,6 +11,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -78,6 +80,8 @@ type Account struct {
 	// modelMappingCacheShared 为 true 时缓存来自只读共享母本（见 PrepareSharedSnapshot），
 	// 指针、长度与运行时版本匹配即直接复用预解析结果，不计算签名。
 	modelMappingCacheShared bool
+	// mappingMu 保护上述缓存字段的并发读写。值为指针，账号按值复制时共享同一把锁。
+	mappingMu atomic.Pointer[sync.Mutex]
 
 	// header_overrides 热路径缓存（非持久化字段，同 model_mapping 缓存先例）
 	headerOverrideCache               map[string]string
@@ -623,7 +627,36 @@ func stringMappingFromRaw(raw any) map[string]string {
 	}
 }
 
+func (a *Account) mappingLock() *sync.Mutex {
+	if mu := a.mappingMu.Load(); mu != nil {
+		return mu
+	}
+	created := &sync.Mutex{}
+	if a.mappingMu.CompareAndSwap(nil, created) {
+		return created
+	}
+	return a.mappingMu.Load()
+}
+
+func cloneModelMapping(in map[string]string) map[string]string {
+	if in == nil {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
 func (a *Account) GetModelMapping() map[string]string {
+	if a == nil {
+		return nil
+	}
+	mu := a.mappingLock()
+	mu.Lock()
+	defer mu.Unlock()
+
 	runtimeVersion := xai.RuntimeModelMappingVersion()
 	credentialsPtr := mapPtr(a.Credentials)
 	rawMapping, _ := a.Credentials["model_mapping"].(map[string]any)
@@ -638,12 +671,12 @@ func (a *Account) GetModelMapping() map[string]string {
 		a.modelMappingCacheRawLen == rawLen &&
 		a.modelMappingCacheRuntimeVersion == runtimeVersion {
 		if a.modelMappingCacheShared {
-			return a.modelMappingCache
+			return cloneModelMapping(a.modelMappingCache)
 		}
 		rawSig = modelMappingSignature(rawMapping)
 		rawSigReady = true
 		if a.modelMappingCacheRawSig == rawSig {
-			return a.modelMappingCache
+			return cloneModelMapping(a.modelMappingCache)
 		}
 	}
 
@@ -660,7 +693,7 @@ func (a *Account) GetModelMapping() map[string]string {
 	a.modelMappingCacheRawSig = rawSig
 	a.modelMappingCacheRuntimeVersion = runtimeVersion
 	a.modelMappingCacheShared = false
-	return mapping
+	return cloneModelMapping(mapping)
 }
 
 // PrepareSharedSnapshot 预解析模型映射，并把账号标记为只读共享母本。
@@ -674,7 +707,10 @@ func (a *Account) PrepareSharedSnapshot() {
 		return
 	}
 	a.GetModelMapping()
+	mu := a.mappingLock()
+	mu.Lock()
 	a.modelMappingCacheShared = true
+	mu.Unlock()
 }
 
 func (a *Account) resolveModelMapping(rawMapping map[string]any) map[string]string {
