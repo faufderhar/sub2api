@@ -2,6 +2,7 @@ package admin
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -18,8 +19,6 @@ import (
 // 借此区分「触发了 step-up 校验」与「直接放行到业务层（200）」。
 func setupRoleStepUpRouter(t *testing.T) (*gin.Engine, *stubAdminService) {
 	t.Helper()
-	gin.SetMode(gin.TestMode)
-	router := gin.New()
 	adminSvc := newStubAdminService()
 	// 追加一个已是管理员的目标用户，验证「目标已是 admin 不触发门控」。
 	adminSvc.users = append(adminSvc.users, service.User{
@@ -28,11 +27,35 @@ func setupRoleStepUpRouter(t *testing.T) (*gin.Engine, *stubAdminService) {
 		Role:   service.RoleAdmin,
 		Status: service.StatusActive,
 	})
+	return setupRoleStepUpRouterWithSettings(t, adminSvc, nil)
+}
 
-	h := NewUserHandler(adminSvc, nil, nil, nil, nil, nil, nil)
+func setupRoleStepUpRouterWithSettings(t *testing.T, adminSvc *stubAdminService, settings *service.SettingService) (*gin.Engine, *stubAdminService) {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	if adminSvc == nil {
+		adminSvc = newStubAdminService()
+		adminSvc.users = append(adminSvc.users, service.User{
+			ID:     2,
+			Email:  "admin@example.com",
+			Role:   service.RoleAdmin,
+			Status: service.StatusActive,
+		})
+	}
+	h := NewUserHandler(adminSvc, nil, nil, nil, nil, nil, settings)
 	router.POST("/api/v1/admin/users", h.Create)
 	router.PUT("/api/v1/admin/users/:id", h.Update)
 	return router, adminSvc
+}
+
+type stubStepUpSettingRepo struct {
+	service.SettingRepository
+	values map[string]string
+}
+
+func (r *stubStepUpSettingRepo) GetValue(_ context.Context, key string) (string, error) {
+	return r.values[key], nil
 }
 
 func doJSON(t *testing.T, router *gin.Engine, method, path string, payload map[string]any) *httptest.ResponseRecorder {
@@ -83,4 +106,24 @@ func TestCreateRegularUserSkipsStepUp(t *testing.T) {
 		"email": "new-user@example.com", "password": "pass123", "role": "user",
 	})
 	require.Equal(t, http.StatusOK, rec.Code)
+}
+
+func TestCreateAdminUserRequiresStepUpWhenSwitchDisabled(t *testing.T) {
+	settings := service.NewSettingService(&stubStepUpSettingRepo{values: map[string]string{
+		service.SettingKeyStepUpEnabled: "false",
+	}}, nil)
+	router, _ := setupRoleStepUpRouterWithSettings(t, nil, settings)
+	rec := doJSON(t, router, http.MethodPost, "/api/v1/admin/users", map[string]any{
+		"email": "new-admin@example.com", "password": "pass123", "role": "admin",
+	})
+	require.Equal(t, http.StatusUnauthorized, rec.Code)
+}
+
+func TestUpdateUserPromoteToAdminRequiresStepUpWhenSwitchDisabled(t *testing.T) {
+	settings := service.NewSettingService(&stubStepUpSettingRepo{values: map[string]string{
+		service.SettingKeyStepUpEnabled: "false",
+	}}, nil)
+	router, _ := setupRoleStepUpRouterWithSettings(t, nil, settings)
+	rec := doJSON(t, router, http.MethodPut, "/api/v1/admin/users/1", map[string]any{"role": "admin"})
+	require.Equal(t, http.StatusUnauthorized, rec.Code)
 }

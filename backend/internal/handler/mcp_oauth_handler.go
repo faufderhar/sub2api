@@ -221,15 +221,9 @@ func (h *MCPOAuthHandler) Decide(c *gin.Context) {
 			response.Forbidden(c, "Only administrators can authorize admin MCP access")
 			return
 		}
-		// Administrator write grants outlive browser sessions, so they always
-		// need a fresh TOTP verification even when the global switch is off.
-		var verified bool
-		if input.ReadOnly != nil && !*input.ReadOnly {
-			verified = middleware.EnforceStepUpAlways(c, h.totp, h.users)
-		} else {
-			verified = middleware.EnforceStepUp(c, h.totp, h.users, h.settings)
-		}
-		if !verified {
+		// Administrator MCP grants (write and read-only) outlive browser sessions,
+		// so they always need a fresh TOTP verification even when the global switch is off.
+		if !middleware.EnforceStepUpAlways(c, h.totp, h.users) {
 			return
 		}
 	}

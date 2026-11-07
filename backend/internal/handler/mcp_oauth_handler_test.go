@@ -405,12 +405,13 @@ func TestMCPOAuthHandlerAdminWriteAlwaysRequiresStepUp(t *testing.T) {
 		{name: "write without TOTP", readOnly: boolPtr(false), status: 403, marker: "STEP_UP_TOTP_NOT_ENABLED"},
 		{name: "write without recent verification", readOnly: boolPtr(false), totp: true, status: 403, marker: "STEP_UP_REQUIRED"},
 		{name: "verified write", readOnly: boolPtr(false), totp: true, granted: true, status: 200, writes: 1},
-		{name: "read-only follows the switch", readOnly: boolPtr(true), status: 200, writes: 1},
-		{name: "default read-only follows the switch", status: 200, writes: 1},
+		{name: "read-only without TOTP", readOnly: boolPtr(true), status: 403, marker: "STEP_UP_TOTP_NOT_ENABLED"},
+		{name: "default read-only without TOTP", status: 403, marker: "STEP_UP_TOTP_NOT_ENABLED"},
+		{name: "verified read-only", readOnly: boolPtr(true), totp: true, granted: true, status: 200, writes: 1},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			h, repo, users, cache := newHandlerMCPFixture(t)
-			// Global step-up is disabled; write grants still need verification.
+			// Global step-up is disabled; admin MCP grants still need verification (write and read-only).
 			h.settings = service.NewSettingService(&handlerMCPSettings{values: map[string]string{service.SettingKeyStepUpEnabled: "false"}}, h.cfg)
 			users.user.TotpEnabled = tt.totp
 			cache.granted = tt.granted
