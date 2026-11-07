@@ -41,7 +41,15 @@ func MergePreservingSensitiveCreds(existing, incoming map[string]any) map[string
 		out[k] = v
 	}
 	for _, key := range SensitiveCredentialKeys {
-		if _, hasIncoming := incoming[key]; hasIncoming {
+		if incomingVal, hasIncoming := incoming[key]; hasIncoming {
+			// Empty string means "leave unchanged", matching payment secret updates.
+			if raw, ok := incomingVal.(string); ok && raw == "" {
+				if existingVal, exists := existing[key]; exists {
+					out[key] = existingVal
+				} else {
+					delete(out, key)
+				}
+			}
 			continue
 		}
 		if existingVal, ok := existing[key]; ok {

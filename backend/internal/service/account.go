@@ -30,6 +30,11 @@ type Account struct {
 	Platform                string
 	Type                    string
 	Credentials             map[string]any
+	// StoredCredentialsJSON is the exact credentials JSONB last read from
+	// persistence (ciphertext after R3-ENC). Used for optimistic compares.
+	StoredCredentialsJSON   string `json:"-"`
+	// CredentialsDecryptErr is set when stored secret fields cannot be opened.
+	CredentialsDecryptErr   error  `json:"-"`
 	Extra                   map[string]any
 	ProxyID                 *int64
 	ProxyFallbackOriginID   *int64

@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -34,6 +35,9 @@ type DataPayload struct {
 	// SkippedShadows 记录导出时被排除的 spark 影子账号数量(见 ExportData)。仅作可见性提示,
 	// 导入侧忽略该字段;omitempty 保持向后兼容。
 	SkippedShadows int `json:"skipped_shadows,omitempty"`
+	// SecretsEncrypted marks that credentials and fingerprints use R3-ENC envelopes.
+	SecretsEncrypted bool   `json:"secrets_encrypted,omitempty"`
+	EncryptionNote   string `json:"encryption_note,omitempty"`
 }
 
 type DataProxy struct {
@@ -71,6 +75,10 @@ type DataAccount struct {
 	RateMultiplier     *float64       `json:"rate_multiplier,omitempty"`
 	ExpiresAt          *int64         `json:"expires_at,omitempty"`
 	AutoPauseOnExpired *bool          `json:"auto_pause_on_expired,omitempty"`
+	// ClaudeFingerprint is the R3-ENC AEAD envelope of the full Claude fingerprint.
+	ClaudeFingerprint string `json:"claude_fingerprint,omitempty"`
+
+	importedFingerprint *service.Fingerprint `json:"-"`
 }
 
 type DataImportRequest struct {
@@ -200,12 +208,17 @@ func (h *AccountHandler) ExportData(c *gin.Context) {
 			v := acc.ExpiresAt.Unix()
 			expiresAt = &v
 		}
+		exportedCreds, fpEnvelope, exportErr := encryptAccountBackupSecrets(h, ctx, &acc)
+		if exportErr != nil {
+			response.ErrorFrom(c, exportErr)
+			return
+		}
 		dataAccounts = append(dataAccounts, DataAccount{
 			Name:               acc.Name,
 			Notes:              acc.Notes,
 			Platform:           acc.Platform,
 			Type:               acc.Type,
-			Credentials:        acc.Credentials,
+			Credentials:        exportedCreds,
 			Extra:              acc.Extra,
 			ProxyKey:           proxyKey,
 			Concurrency:        acc.Concurrency,
@@ -213,14 +226,17 @@ func (h *AccountHandler) ExportData(c *gin.Context) {
 			RateMultiplier:     acc.RateMultiplier,
 			ExpiresAt:          expiresAt,
 			AutoPauseOnExpired: &acc.AutoPauseOnExpired,
+			ClaudeFingerprint:  fpEnvelope,
 		})
 	}
 
 	payload := DataPayload{
-		ExportedAt:     time.Now().UTC().Format(time.RFC3339),
-		Proxies:        dataProxies,
-		Accounts:       dataAccounts,
-		SkippedShadows: skippedShadows,
+		ExportedAt:       time.Now().UTC().Format(time.RFC3339),
+		Proxies:          dataProxies,
+		Accounts:         dataAccounts,
+		SkippedShadows:   skippedShadows,
+		SecretsEncrypted: service.CurrentSecretFieldCrypto() != nil && service.CurrentSecretFieldCrypto().Enabled(),
+		EncryptionNote:   backupEncryptionNote,
 	}
 
 	response.Success(c, payload)
@@ -406,6 +422,15 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 
 	for i := range dataPayload.Accounts {
 		item := dataPayload.Accounts[i]
+		if err := decryptImportedAccountSecrets(&item); err != nil {
+			result.AccountFailed++
+			result.Errors = append(result.Errors, DataImportError{
+				Kind:    "account",
+				Name:    item.Name,
+				Message: err.Error(),
+			})
+			continue
+		}
 		if err := validateDataAccount(item); err != nil {
 			result.AccountFailed++
 			result.Errors = append(result.Errors, DataImportError{
@@ -460,6 +485,15 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 				Message: err.Error(),
 			})
 			continue
+		}
+		if item.importedFingerprint != nil && h.identityService != nil {
+			if _, restoreErr := h.identityService.RestoreFingerprintFromBackup(ctx, created, item.importedFingerprint); restoreErr != nil {
+				result.Errors = append(result.Errors, DataImportError{
+					Kind:    "account",
+					Name:    item.Name,
+					Message: "fingerprint restore: " + restoreErr.Error(),
+				})
+			}
 		}
 		// 收集 Antigravity OAuth 账号，稍后异步设置隐私
 		if created.Platform == service.PlatformAntigravity && created.Type == service.AccountTypeOAuth {
@@ -787,4 +821,73 @@ func normalizeProxyStatus(status string) string {
 	default:
 		return normalized
 	}
+}
+
+const backupEncryptionNote = "Contains AEAD ciphertext for credentials and Claude fingerprints. Back up TOTP_ENCRYPTION_KEY / totp_encryption.key independently of this file. Rolling back to software that stores these secrets in plaintext is not a security rollback."
+
+func encryptAccountBackupSecrets(h *AccountHandler, ctx context.Context, acc *service.Account) (map[string]any, string, error) {
+	creds := acc.Credentials
+	crypto := service.CurrentSecretFieldCrypto()
+	if crypto != nil && crypto.Enabled() {
+		encrypted, err := crypto.EncryptBackupCredentials(acc.Credentials)
+		if err != nil {
+			return nil, "", err
+		}
+		creds = encrypted
+	}
+	if acc == nil || !acc.IsAnthropicOAuthOrSetupToken() || h == nil || h.identityService == nil {
+		return creds, "", nil
+	}
+	fp, err := h.identityService.GetOrCreateForAccount(ctx, acc, nil)
+	if err != nil {
+		return nil, "", err
+	}
+	if fp == nil {
+		return creds, "", nil
+	}
+	raw, err := json.Marshal(fp)
+	if err != nil {
+		return nil, "", err
+	}
+	if crypto == nil || !crypto.Enabled() {
+		return creds, string(raw), nil
+	}
+	envelope, err := crypto.EncryptBackupFingerprint(raw)
+	if err != nil {
+		return nil, "", err
+	}
+	return creds, envelope, nil
+}
+
+func decryptImportedAccountSecrets(item *DataAccount) error {
+	if item == nil {
+		return nil
+	}
+	crypto := service.CurrentSecretFieldCrypto()
+	if crypto != nil && crypto.Enabled() && item.Credentials != nil {
+		decrypted, err := crypto.DecryptBackupCredentials(item.Credentials)
+		if err != nil {
+			return err
+		}
+		item.Credentials = decrypted
+	}
+	if strings.TrimSpace(item.ClaudeFingerprint) == "" {
+		return nil
+	}
+	var raw []byte
+	var err error
+	if crypto != nil && crypto.Enabled() {
+		raw, err = crypto.DecryptBackupFingerprint(item.ClaudeFingerprint)
+		if err != nil {
+			return err
+		}
+	} else {
+		raw = []byte(item.ClaudeFingerprint)
+	}
+	var fp service.Fingerprint
+	if err := json.Unmarshal(raw, &fp); err != nil {
+		return fmt.Errorf("invalid claude_fingerprint payload")
+	}
+	item.importedFingerprint = &fp
+	return nil
 }

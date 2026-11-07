@@ -469,3 +469,41 @@ func clientIDPrefix(id string) string {
 	}
 	return id[:8]
 }
+
+// RestoreFingerprintFromBackup writes an imported fingerprint onto a newly
+// created account. ClientID/seed collisions isolate the imported (later) account
+// and never rewrite the earlier keeper.
+func (s *IdentityService) RestoreFingerprintFromBackup(ctx context.Context, account *Account, imported *Fingerprint) (*Fingerprint, error) {
+	if s == nil || account == nil || imported == nil {
+		return nil, fmt.Errorf("fingerprint restore: missing account or payload")
+	}
+	if !account.IsAnthropicOAuthOrSetupToken() {
+		return nil, ErrFingerprintNotApplicable
+	}
+	next := cloneFingerprint(imported)
+	next.AccountID = account.ID
+	if next.Generation < 1 {
+		next.Generation = 1
+	}
+	next.Conflict = false
+	next.UpdatedAtTime = time.Now().UTC()
+	next.UpdatedAt = next.UpdatedAtTime.Unix()
+	if s.store == nil {
+		s.writeThroughCache(ctx, next)
+		return cloneFingerprint(next), nil
+	}
+	err := s.store.Update(ctx, next)
+	if err != nil && IsFingerprintUniqueViolation(err) {
+		next.Conflict = true
+		err = s.store.Update(ctx, next)
+		if err == nil {
+			logger.LegacyPrintf("service.identity", "Isolated restored fingerprint for account %d prefix=%s", account.ID, clientIDPrefix(next.ClientID))
+		}
+	}
+	if err != nil {
+		return nil, err
+	}
+	s.evictCache(ctx, account.ID)
+	s.writeThroughCache(ctx, next)
+	return cloneFingerprint(next), nil
+}

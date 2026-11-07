@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -540,9 +539,9 @@ func grokCredentialMutationSnapshot(account *Account) GrokCredentialMutationSnap
 	if account == nil {
 		return GrokCredentialMutationSnapshot{}
 	}
-	credentialsJSON := "null"
-	if encoded, err := json.Marshal(account.Credentials); err == nil {
-		credentialsJSON = string(encoded)
+	credentialsJSON := account.PersistedCredentialsJSON()
+	if credentialsJSON == "" {
+		credentialsJSON = "null"
 	}
 	snapshot := GrokCredentialMutationSnapshot{
 		CredentialsJSON: credentialsJSON,

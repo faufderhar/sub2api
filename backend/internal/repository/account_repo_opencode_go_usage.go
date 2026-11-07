@@ -297,7 +297,7 @@ func lockOpenCodeGoUsageGroup(
 	account *service.Account,
 	apiKey string,
 ) ([]lockedOpenCodeGoUsageMember, error) {
-	credentials, err := json.Marshal(normalizeJSONMap(account.Credentials))
+	credentials, err := accountCredentialsIdentityJSON(account)
 	if err != nil {
 		return nil, err
 	}

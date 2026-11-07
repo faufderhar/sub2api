@@ -1002,7 +1002,7 @@ func (s *TokenRefreshService) refreshWithRetryWithRateGate(
 					persistentlyBlocked, setErr = conditionalRepo.SetGrokOAuthRefreshErrorIfCredentialsUnchanged(
 						ctx,
 						account.ID,
-						account.Credentials,
+						account.CredentialsForCompare(),
 						account.ProxyID,
 						errorMsg,
 					)
@@ -1097,7 +1097,7 @@ func (s *TokenRefreshService) refreshWithRetryWithRateGate(
 		applied, setErr := conditionalRepo.SetGrokOAuthRefreshTempUnschedulableIfCredentialsUnchanged(
 			ctx,
 			account.ID,
-			account.Credentials,
+			account.CredentialsForCompare(),
 			account.ProxyID,
 			until,
 			reason,

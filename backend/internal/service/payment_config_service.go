@@ -324,7 +324,7 @@ func (s *PaymentConfigService) getStripePublishableKey(ctx context.Context) stri
 	if err != nil || len(instances) == 0 {
 		return ""
 	}
-	cfg, err := s.decryptConfig(instances[0].Config)
+	cfg, err := s.decryptConfig(instances[0].ID, instances[0].ProviderKey, instances[0].Config)
 	if err != nil || cfg == nil {
 		return ""
 	}

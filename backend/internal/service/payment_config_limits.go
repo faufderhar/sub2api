@@ -158,7 +158,7 @@ func (s *PaymentConfigService) pcInstancePaymentCurrency(inst *dbent.PaymentProv
 	}
 	cfg := map[string]string{}
 	if s != nil {
-		decrypted, err := s.decryptConfig(inst.Config)
+		decrypted, err := s.decryptConfig(inst.ID, inst.ProviderKey, inst.Config)
 		if err == nil && decrypted != nil {
 			cfg = decrypted
 		}
@@ -191,7 +191,7 @@ func (s *PaymentConfigService) pcInstanceEasyPayCustomMethodDisplayName(inst *db
 	}
 	cfg := map[string]string{}
 	if s != nil {
-		decrypted, err := s.decryptConfig(inst.Config)
+		decrypted, err := s.decryptConfig(inst.ID, inst.ProviderKey, inst.Config)
 		if err == nil && decrypted != nil {
 			cfg = decrypted
 		}

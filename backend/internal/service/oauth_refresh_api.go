@@ -303,7 +303,7 @@ func (api *OAuthRefreshAPI) RefreshIfNeeded(
 			applied, updateErr := conditionalRepo.UpdateGrokOAuthCredentialsIfUnchanged(
 				ctx,
 				freshAccount.ID,
-				attemptedAccount.Credentials,
+				attemptedAccount.CredentialsForCompare(),
 				attemptedAccount.ProxyID,
 				newCredentials,
 			)
