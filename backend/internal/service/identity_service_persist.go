@@ -440,7 +440,7 @@ func (s *IdentityService) BuildSummary(fp *Fingerprint, account *Account, passth
 	if os == "" {
 		os = strings.ToLower(fp.StainlessOS)
 	}
-	return FingerprintSummary{
+	summary := FingerprintSummary{
 		Applicable:         true,
 		Regenerable:        true,
 		Generation:         fp.Generation,
@@ -460,6 +460,11 @@ func (s *IdentityService) BuildSummary(fp *Fingerprint, account *Account, passth
 		PassthroughUserID:  passthrough,
 		Conflict:           fp.Conflict,
 	}
+	if reason, message := isolationSkipSummaryNotes(fp.Conflict); reason != "" {
+		summary.Reason = reason
+		summary.Message = message
+	}
+	return summary
 }
 
 func clientIDPrefix(id string) string {
