@@ -12,7 +12,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -86,7 +85,7 @@ type Account struct {
 	// 指针、长度与运行时版本匹配即直接复用预解析结果，不计算签名。
 	modelMappingCacheShared bool
 	// mappingMu 保护上述缓存字段的并发读写。值为指针，账号按值复制时共享同一把锁。
-	mappingMu atomic.Pointer[sync.Mutex]
+	mappingMu *sync.Mutex
 
 	// header_overrides 热路径缓存（非持久化字段，同 model_mapping 缓存先例）
 	headerOverrideCache               map[string]string
@@ -633,14 +632,15 @@ func stringMappingFromRaw(raw any) map[string]string {
 }
 
 func (a *Account) mappingLock() *sync.Mutex {
-	if mu := a.mappingMu.Load(); mu != nil {
-		return mu
+	if a == nil {
+		return &sync.Mutex{}
+	}
+	if a.mappingMu != nil {
+		return a.mappingMu
 	}
 	created := &sync.Mutex{}
-	if a.mappingMu.CompareAndSwap(nil, created) {
-		return created
-	}
-	return a.mappingMu.Load()
+	a.mappingMu = created
+	return created
 }
 
 func cloneModelMapping(in map[string]string) map[string]string {
