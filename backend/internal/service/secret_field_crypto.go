@@ -45,6 +45,22 @@ func (c *SecretFieldCrypto) Enabled() bool {
 	return c != nil && len(c.key) == fieldcrypto.AES256KeySize
 }
 
+// SealString encrypts plaintext with the given AAD using the versioned AEAD envelope.
+func (c *SecretFieldCrypto) SealString(plaintext, aad string) (string, error) {
+	if c == nil || !c.Enabled() {
+		return "", fmt.Errorf("secret field crypto is not enabled")
+	}
+	return fieldcrypto.Encrypt(c.key, plaintext, aad)
+}
+
+// OpenString decrypts a versioned envelope (or returns historical plaintext unchanged).
+func (c *SecretFieldCrypto) OpenString(value, aad string) (string, error) {
+	if c == nil || !c.Enabled() {
+		return "", fmt.Errorf("secret field crypto is not enabled")
+	}
+	return fieldcrypto.Decrypt(c.key, value, aad)
+}
+
 // Persistent reports whether the key survives process restart.
 func (c *SecretFieldCrypto) Persistent() bool {
 	return c != nil && c.persistent

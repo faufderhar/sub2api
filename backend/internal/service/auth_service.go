@@ -1811,7 +1811,9 @@ func (s *AuthService) generateRefreshToken(ctx context.Context, user *User, fami
 }
 
 // RefreshTokenPair 使用Refresh Token刷新Token对
-// 实现Token轮转：每次刷新都会生成新的Refresh Token，旧Token立即失效
+// 实现Token轮转：每次刷新都会生成新的Refresh Token，旧Token立即失效。
+// 同一旧 cookie 在 10 秒宽限内并发刷新时，只有一个请求原子消费旧 token 并签发新对；
+// 其余请求共享同一组 access + refresh（同一颗 Set-Cookie）。
 func (s *AuthService) RefreshTokenPair(ctx context.Context, refreshToken string) (*TokenPairWithUser, error) {
 	// 检查 refreshTokenCache 是否可用
 	if s.refreshTokenCache == nil {
@@ -1825,11 +1827,11 @@ func (s *AuthService) RefreshTokenPair(ctx context.Context, refreshToken string)
 
 	tokenHash := hashToken(refreshToken)
 
-	// 获取Token数据
-	data, err := s.refreshTokenCache.GetRefreshToken(ctx, tokenHash)
+	// Atomically claim the live token so concurrent tabs cannot each mint a new pair.
+	data, err := s.refreshTokenCache.ConsumeRefreshToken(ctx, tokenHash)
 	if err != nil {
 		if errors.Is(err, ErrRefreshTokenNotFound) {
-			if pair, ok := s.lookupRefreshRotationGrace(ctx, tokenHash); ok {
+			if pair, ok := s.waitForRefreshRotationGrace(ctx, tokenHash); ok {
 				return pair, nil
 			}
 			if familyID, ok := s.lookupRefreshReplacement(ctx, tokenHash); ok {
@@ -1843,14 +1845,11 @@ func (s *AuthService) RefreshTokenPair(ctx context.Context, refreshToken string)
 		return nil, ErrServiceUnavailable
 	}
 	if !data.IssuedViaCookie {
-		_ = s.refreshTokenCache.DeleteRefreshToken(ctx, tokenHash)
 		return nil, ErrRefreshTokenInvalid
 	}
 
-	// 检查Token是否过期
+	// 检查Token是否过期（Consume already removed the key）
 	if time.Now().After(data.ExpiresAt) {
-		// 删除过期Token
-		_ = s.refreshTokenCache.DeleteRefreshToken(ctx, tokenHash)
 		return nil, ErrRefreshTokenExpired
 	}
 
@@ -1863,6 +1862,7 @@ func (s *AuthService) RefreshTokenPair(ctx context.Context, refreshToken string)
 			return nil, ErrRefreshTokenInvalid
 		}
 		logger.LegacyPrintf("service.auth", "[Auth] Database error getting user for token refresh: %v", err)
+		s.restoreConsumedRefreshToken(ctx, tokenHash, data)
 		return nil, ErrServiceUnavailable
 	}
 
@@ -1893,12 +1893,10 @@ func (s *AuthService) RefreshTokenPair(ctx context.Context, refreshToken string)
 	// 生成新的Token对，保持同一个家族ID
 	pair, err := s.GenerateTokenPair(ctx, user, data.FamilyID)
 	if err != nil {
+		s.restoreConsumedRefreshToken(ctx, tokenHash, data)
 		return nil, err
 	}
 	s.recordRefreshRotation(ctx, tokenHash, data, user.Role, pair)
-	if err := s.refreshTokenCache.DeleteRefreshToken(ctx, tokenHash); err != nil {
-		logger.LegacyPrintf("service.auth", "[Auth] Failed to delete old refresh token: %v", err)
-	}
 	return &TokenPairWithUser{
 		TokenPair: *pair,
 		UserRole:  user.Role,
@@ -1907,6 +1905,8 @@ func (s *AuthService) RefreshTokenPair(ctx context.Context, refreshToken string)
 
 const (
 	refreshRotationGracePeriod = 10 * time.Second
+	refreshGraceLookupWait     = 500 * time.Millisecond
+	refreshGraceLookupInterval = 5 * time.Millisecond
 	refreshGraceKeyPrefix      = "grace:"
 	refreshReplacedKeyPrefix   = "replaced:"
 )
@@ -1914,22 +1914,103 @@ const (
 func refreshGraceKey(tokenHash string) string    { return refreshGraceKeyPrefix + tokenHash }
 func refreshReplacedKey(tokenHash string) string { return refreshReplacedKeyPrefix + tokenHash }
 
+func refreshGraceSuccessorAAD(oldHash string) string {
+	return "refresh:grace:" + oldHash + ":successor_refresh"
+}
+
+func (s *AuthService) restoreConsumedRefreshToken(ctx context.Context, tokenHash string, data *RefreshTokenData) {
+	if s.refreshTokenCache == nil || data == nil {
+		return
+	}
+	ttl := time.Until(data.ExpiresAt)
+	if ttl < time.Second {
+		ttl = time.Second
+	}
+	if err := s.refreshTokenCache.StoreRefreshToken(ctx, tokenHash, data, ttl); err != nil {
+		logger.LegacyPrintf("service.auth", "[Auth] Failed to restore consumed refresh token: %v", err)
+	}
+}
+
+func (s *AuthService) waitForRefreshRotationGrace(ctx context.Context, tokenHash string) (*TokenPairWithUser, bool) {
+	if pair, ok := s.lookupRefreshRotationGrace(ctx, tokenHash); ok {
+		return pair, true
+	}
+	deadline := time.Now().Add(refreshGraceLookupWait)
+	ticker := time.NewTicker(refreshGraceLookupInterval)
+	defer ticker.Stop()
+	for time.Now().Before(deadline) {
+		select {
+		case <-ctx.Done():
+			return nil, false
+		case <-ticker.C:
+			if pair, ok := s.lookupRefreshRotationGrace(ctx, tokenHash); ok {
+				return pair, true
+			}
+		}
+	}
+	return s.lookupRefreshRotationGrace(ctx, tokenHash)
+}
+
+func sealRefreshGraceSuccessor(oldHash, plaintext string) (string, error) {
+	crypto := CurrentSecretFieldCrypto()
+	if crypto == nil || !crypto.Enabled() {
+		return "", errors.New("secret field crypto is not initialized")
+	}
+	return crypto.SealString(plaintext, refreshGraceSuccessorAAD(oldHash))
+}
+
+func openRefreshGraceSuccessor(oldHash, value string) (string, error) {
+	crypto := CurrentSecretFieldCrypto()
+	if crypto == nil || !crypto.Enabled() {
+		return "", errors.New("secret field crypto is not initialized")
+	}
+	return crypto.OpenString(value, refreshGraceSuccessorAAD(oldHash))
+}
+
+func successorRefreshFromGrace(oldHash string, data *RefreshTokenData) (string, bool) {
+	if data == nil {
+		return "", false
+	}
+	if data.SuccessorRefreshTokenEnc != "" {
+		plain, err := openRefreshGraceSuccessor(oldHash, data.SuccessorRefreshTokenEnc)
+		if err != nil {
+			logger.LegacyPrintf("service.auth", "[Auth] Failed to decrypt refresh rotation grace: %v", err)
+			return "", false
+		}
+		return plain, plain != ""
+	}
+	// Rolling-upgrade compat: grace records written before encryption landed
+	// may still carry plaintext for up to refreshRotationGracePeriod.
+	if data.SuccessorRefreshToken != "" {
+		return data.SuccessorRefreshToken, true
+	}
+	return "", false
+}
+
 func (s *AuthService) recordRefreshRotation(ctx context.Context, oldHash string, old *RefreshTokenData, role string, pair *TokenPair) {
 	if s.refreshTokenCache == nil || old == nil || pair == nil {
 		return
 	}
+	enc, err := sealRefreshGraceSuccessor(oldHash, pair.RefreshToken)
+	if err != nil {
+		logger.LegacyPrintf("service.auth", "[Auth] Failed to encrypt refresh rotation grace successor: %v", err)
+		return
+	}
 	now := time.Now()
 	grace := &RefreshTokenData{
-		UserID:                old.UserID,
-		FamilyID:              old.FamilyID,
-		ReplacedAt:            now,
-		SuccessorAccessToken:  pair.AccessToken,
-		SuccessorRefreshToken: pair.RefreshToken,
-		SuccessorExpiresIn:    pair.ExpiresIn,
-		SuccessorUserRole:     role,
+		UserID:                   old.UserID,
+		FamilyID:                 old.FamilyID,
+		ReplacedAt:               now,
+		SuccessorAccessToken:     pair.AccessToken,
+		SuccessorRefreshTokenEnc: enc,
+		SuccessorExpiresIn:       pair.ExpiresIn,
+		SuccessorUserRole:        role,
 	}
-	if err := s.refreshTokenCache.StoreRefreshToken(ctx, refreshGraceKey(oldHash), grace, refreshRotationGracePeriod); err != nil {
+	stored, err := s.refreshTokenCache.StoreRefreshTokenIfAbsent(ctx, refreshGraceKey(oldHash), grace, refreshRotationGracePeriod)
+	if err != nil {
 		logger.LegacyPrintf("service.auth", "[Auth] Failed to store refresh rotation grace: %v", err)
+	} else if !stored {
+		logger.LegacyPrintf("service.auth", "[Auth] Refresh rotation grace already present; keeping first successor")
 	}
 	replacedTTL := time.Until(old.ExpiresAt)
 	if replacedTTL < refreshRotationGracePeriod {
@@ -1943,7 +2024,11 @@ func (s *AuthService) recordRefreshRotation(ctx context.Context, oldHash string,
 
 func (s *AuthService) lookupRefreshRotationGrace(ctx context.Context, tokenHash string) (*TokenPairWithUser, bool) {
 	data, err := s.refreshTokenCache.GetRefreshToken(ctx, refreshGraceKey(tokenHash))
-	if err != nil || data == nil || data.SuccessorRefreshToken == "" {
+	if err != nil || data == nil {
+		return nil, false
+	}
+	refresh, ok := successorRefreshFromGrace(tokenHash, data)
+	if !ok || data.SuccessorAccessToken == "" {
 		return nil, false
 	}
 	if !data.ReplacedAt.IsZero() && time.Since(data.ReplacedAt) > refreshRotationGracePeriod {
@@ -1952,7 +2037,7 @@ func (s *AuthService) lookupRefreshRotationGrace(ctx context.Context, tokenHash 
 	return &TokenPairWithUser{
 		TokenPair: TokenPair{
 			AccessToken:  data.SuccessorAccessToken,
-			RefreshToken: data.SuccessorRefreshToken,
+			RefreshToken: refresh,
 			ExpiresIn:    data.SuccessorExpiresIn,
 		},
 		UserRole: data.SuccessorUserRole,

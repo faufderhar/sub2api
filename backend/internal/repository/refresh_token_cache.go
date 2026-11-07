@@ -65,6 +65,37 @@ func (c *refreshTokenCache) GetRefreshToken(ctx context.Context, tokenHash strin
 	return &data, nil
 }
 
+func (c *refreshTokenCache) ConsumeRefreshToken(ctx context.Context, tokenHash string) (*service.RefreshTokenData, error) {
+	key := refreshTokenKey(tokenHash)
+	// GETDEL (Redis 6.2+) atomically claims the live token so same-millisecond
+	// refreshers cannot each mint a new pair.
+	val, err := c.rdb.GetDel(ctx, key).Result()
+	if err != nil {
+		if err == redis.Nil {
+			return nil, service.ErrRefreshTokenNotFound
+		}
+		return nil, fmt.Errorf("consume refresh token: %w", err)
+	}
+	var data service.RefreshTokenData
+	if err := json.Unmarshal([]byte(val), &data); err != nil {
+		return nil, fmt.Errorf("unmarshal refresh token data: %w", err)
+	}
+	return &data, nil
+}
+
+func (c *refreshTokenCache) StoreRefreshTokenIfAbsent(ctx context.Context, tokenHash string, data *service.RefreshTokenData, ttl time.Duration) (bool, error) {
+	key := refreshTokenKey(tokenHash)
+	val, err := json.Marshal(data)
+	if err != nil {
+		return false, fmt.Errorf("marshal refresh token data: %w", err)
+	}
+	ok, err := c.rdb.SetNX(ctx, key, val, ttl).Result()
+	if err != nil {
+		return false, fmt.Errorf("store refresh token if absent: %w", err)
+	}
+	return ok, nil
+}
+
 func (c *refreshTokenCache) DeleteRefreshToken(ctx context.Context, tokenHash string) error {
 	key := refreshTokenKey(tokenHash)
 	return c.rdb.Del(ctx, key).Err()
