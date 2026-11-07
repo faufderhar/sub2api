@@ -3,12 +3,21 @@ import { flushPromises, mount } from '@vue/test-utils'
 
 import UserEditModal from '../UserEditModal.vue'
 
-const { update, updateUserAttributeValues, showSuccess, showError } = vi.hoisted(() => ({
+const { update, updateUserAttributeValues, showSuccess, showError, stepUpRun } = vi.hoisted(() => ({
   update: vi.fn(),
   updateUserAttributeValues: vi.fn(),
   showSuccess: vi.fn(),
-  showError: vi.fn()
+  showError: vi.fn(),
+  stepUpRun: vi.fn(async (fn: () => unknown) => fn())
 }))
+
+vi.mock('@/composables/useStepUp', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/composables/useStepUp')>()
+  return {
+    ...actual,
+    useStepUp: () => ({ run: stepUpRun })
+  }
+})
 
 vi.mock('@/api/admin', () => ({
   adminAPI: {
@@ -59,6 +68,7 @@ describe('UserEditModal concurrency', () => {
     updateUserAttributeValues.mockReset()
     showSuccess.mockReset()
     showError.mockReset()
+    stepUpRun.mockClear()
     update.mockResolvedValue({})
   })
 
@@ -86,5 +96,21 @@ describe('UserEditModal concurrency', () => {
 
     expect(showError).toHaveBeenCalledWith('admin.users.concurrencyNonNegative')
     expect(update).not.toHaveBeenCalled()
+  })
+
+  it('R3-STEP: wraps update with stepUp.run only when promoting a user to admin', async () => {
+    const wrapper = mountModal(1)
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(stepUpRun).not.toHaveBeenCalled()
+    expect(update).toHaveBeenCalledTimes(1)
+
+    update.mockClear()
+    stepUpRun.mockClear()
+    ;(wrapper.vm as unknown as { $: { setupState: { form: { role: string } } } }).$.setupState.form.role = 'admin'
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(stepUpRun).toHaveBeenCalledTimes(1)
+    expect(update).toHaveBeenCalledWith(7, expect.objectContaining({ role: 'admin' }))
   })
 })

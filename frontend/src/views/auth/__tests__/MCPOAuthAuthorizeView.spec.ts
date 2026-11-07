@@ -154,6 +154,22 @@ describe('MCP OAuth consent', () => {
     expect(assign).toHaveBeenCalledWith(redirectURL)
   })
 
+  it('R3-STEP: read-only approval also uses step-up before granting access', async () => {
+    authorize.mockRejectedValueOnce({ reason: 'STEP_UP_REQUIRED' }).mockResolvedValueOnce({ redirect_url: redirectURL })
+    const wrapper = render()
+    await flushPromises()
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(authorize).toHaveBeenCalledTimes(1)
+    expect(authorize).toHaveBeenCalledWith({ authorization: request, approved: true, scope: 'user', read_only: true })
+    expect(assign).not.toHaveBeenCalled()
+    await wrapper.get('[data-testid="step-up-verify"]').trigger('click')
+    await flushPromises()
+    expect(authorize).toHaveBeenCalledTimes(2)
+    expect(authorize.mock.calls[1][0]).toEqual({ authorization: request, approved: true, scope: 'user', read_only: true })
+    expect(assign).toHaveBeenCalledWith(redirectURL)
+  })
+
   it('explains that administrator write access always needs two-factor verification', async () => {
     auth.isAdmin = true
     const wrapper = render()

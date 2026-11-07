@@ -97,8 +97,13 @@ const submit = async () => {
     if (balance !== '') {
       payload.balance = Number(balance)
     }
-    // 创建管理员属敏感操作：后端返回 STEP_UP_REQUIRED 时弹 TOTP 验证并重试
-    await stepUp.run(() => adminAPI.users.create(payload))
+    // R3-STEP：仅创建管理员时包 stepUp.run；创建普通用户不要扩大范围
+    const request = () => adminAPI.users.create(payload)
+    if (payload.role === 'admin') {
+      await stepUp.run(request)
+    } else {
+      await request()
+    }
     appStore.showSuccess(t('admin.users.userCreated'))
     emit('success'); emit('close')
   } catch (e: any) {
