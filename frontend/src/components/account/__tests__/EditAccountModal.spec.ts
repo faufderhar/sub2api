@@ -33,6 +33,8 @@ vi.mock('@/api/admin', () => ({
   adminAPI: {
     accounts: {
       update: updateAccountMock,
+      getFingerprint: vi.fn().mockResolvedValue({ applicable: false, regenerable: false }),
+      regenerateFingerprint: vi.fn(),
       checkMixedChannelRisk: checkMixedChannelRiskMock
     },
     settings: {
