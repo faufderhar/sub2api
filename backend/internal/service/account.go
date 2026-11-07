@@ -12,7 +12,9 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
+	"unsafe"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/domain"
@@ -85,6 +87,7 @@ type Account struct {
 	// 指针、长度与运行时版本匹配即直接复用预解析结果，不计算签名。
 	modelMappingCacheShared bool
 	// mappingMu 保护上述缓存字段的并发读写。值为指针，账号按值复制时共享同一把锁。
+	// 首次懒加载用 atomic CAS 写入，避免并发 GetModelMapping 竞态。
 	mappingMu *sync.Mutex
 
 	// header_overrides 热路径缓存（非持久化字段，同 model_mapping 缓存先例）
@@ -635,12 +638,15 @@ func (a *Account) mappingLock() *sync.Mutex {
 	if a == nil {
 		return &sync.Mutex{}
 	}
-	if a.mappingMu != nil {
-		return a.mappingMu
+	addr := (*unsafe.Pointer)(unsafe.Pointer(&a.mappingMu)) // #nosec G103 -- CAS publish of *Mutex; atomic.Pointer would fail go vet copylocks
+	if p := atomic.LoadPointer(addr); p != nil {
+		return (*sync.Mutex)(p)
 	}
 	created := &sync.Mutex{}
-	a.mappingMu = created
-	return created
+	if atomic.CompareAndSwapPointer(addr, nil, unsafe.Pointer(created)) { // #nosec G103
+		return created
+	}
+	return (*sync.Mutex)(atomic.LoadPointer(addr))
 }
 
 func cloneModelMapping(in map[string]string) map[string]string {
