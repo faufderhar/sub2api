@@ -235,4 +235,45 @@ describe('setupTokenUserMessage (FD2-14 / FD2-17)', () => {
     expect(setupTokenUserMessage({ status: 500 }, t)).toBeNull()
     expect(setupTokenUserMessage({}, t)).toBeNull()
   })
+
+  it('FD2-18: non-setup reason on HTTP 429 returns null (not wizard rate-limit copy)', () => {
+    const t = tFor('en')
+    expect(
+      setupTokenUserMessage(
+        { reason: 'TOTP_TOO_MANY_ATTEMPTS', status: 429, retryAfter: 30, message: 'too many' } as never,
+        t
+      )
+    ).toBeNull()
+    expect(
+      setupTokenUserMessage(
+        { reason: 'OTHER', status: 429, retryAfter: 12 } as never,
+        t
+      )
+    ).toBeNull()
+    expect(
+      setupTokenUserMessage({ reason: 'STEP_UP_REQUIRED', status: 429 } as never, t)
+    ).toBeNull()
+  })
+
+  it('FD2-18: known SETUP_TOKEN_* reasons still map when status is also 429', () => {
+    const t = tFor('zh')
+    expect(
+      setupTokenUserMessage(
+        { reason: SETUP_TOKEN_REQUIRED, status: 429, message: 'be' } as never,
+        t
+      )
+    ).toBe(zhLanding.setup.setupToken.required)
+    expect(
+      setupTokenUserMessage(
+        { reason: SETUP_TOKEN_INVALID, status: 429, message: 'be' } as never,
+        t
+      )
+    ).toBe(zhLanding.setup.setupToken.invalid)
+    expect(
+      setupTokenUserMessage(
+        { reason: SETUP_TOKEN_RATE_LIMITED, status: 429, retryAfter: 8, message: 'be' } as never,
+        t
+      )
+    ).toBe('尝试过多，请 8 秒后再试')
+  })
 })
