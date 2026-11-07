@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"fmt"
-	"math/rand/v2"
 	"slices"
 	"sync"
 	"time"
@@ -145,29 +144,6 @@ func (s *TLSFingerprintProfileService) GetProfileByID(id int64) *tlsfingerprint.
 		return p.ToTLSProfile()
 	}
 	return nil
-}
-
-// getRandomProfile 从本地缓存中随机选择一个 Profile
-func (s *TLSFingerprintProfileService) getRandomProfile() *tlsfingerprint.Profile {
-	s.localMu.RLock()
-	defer s.localMu.RUnlock()
-
-	if len(s.localCache) == 0 {
-		return nil
-	}
-
-	// 收集所有 profile
-	profiles := make([]*model.TLSFingerprintProfile, 0, len(s.localCache))
-	for _, p := range s.localCache {
-		if p != nil {
-			profiles = append(profiles, p)
-		}
-	}
-	if len(profiles) == 0 {
-		return nil
-	}
-
-	return profiles[rand.IntN(len(profiles))].ToTLSProfile()
 }
 
 // ResolveTLSProfile 根据 Account 的配置解析出运行时 TLS Profile
