@@ -17,6 +17,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/identityadoptiondecision"
 	"github.com/Wei-Shaw/sub2api/ent/predicate"
 	dbuser "github.com/Wei-Shaw/sub2api/ent/user"
+	"github.com/Wei-Shaw/sub2api/internal/handler/dto"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/oauth"
@@ -54,8 +55,9 @@ type oauthPendingSessionPayload struct {
 }
 
 type oauthAdoptionDecisionRequest struct {
-	AdoptDisplayName *bool `json:"adopt_display_name,omitempty"`
-	AdoptAvatar      *bool `json:"adopt_avatar,omitempty"`
+	AdoptDisplayName *bool  `json:"adopt_display_name,omitempty"`
+	AdoptAvatar      *bool  `json:"adopt_avatar,omitempty"`
+	CompletionCode   string `json:"completion_code,omitempty"`
 }
 
 type bindPendingOAuthLoginRequest struct {
@@ -1612,11 +1614,13 @@ func (h *AuthHandler) transitionPendingOAuthAccountToChoiceState(
 }
 
 func writeOAuthTokenPairResponse(c *gin.Context, tokenPair *service.TokenPair) {
+	if tokenPair != nil {
+		setRefreshCookie(c, nil, tokenPair.RefreshToken)
+	}
 	c.JSON(http.StatusOK, gin.H{
-		"access_token":  tokenPair.AccessToken,
-		"refresh_token": tokenPair.RefreshToken,
-		"expires_in":    tokenPair.ExpiresIn,
-		"token_type":    "Bearer",
+		"access_token": tokenPair.AccessToken,
+		"expires_in":   tokenPair.ExpiresIn,
+		"token_type":   "Bearer",
 	})
 }
 
@@ -1896,6 +1900,9 @@ func (h *AuthHandler) createPendingOAuthAccount(c *gin.Context, provider string)
 // ExchangePendingOAuthCompletion redeems a pending OAuth browser session into a frontend-safe payload.
 // POST /api/v1/auth/oauth/pending/exchange
 func (h *AuthHandler) ExchangePendingOAuthCompletion(c *gin.Context) {
+	if !ensureAuthCookieCSRF(c, h.cfg) {
+		return
+	}
 	secureCookie := isRequestHTTPS(c)
 	clearCookies := func() {
 		clearOAuthPendingSessionCookie(c, secureCookie)
@@ -1907,19 +1914,6 @@ func (h *AuthHandler) ExchangePendingOAuthCompletion(c *gin.Context) {
 		return
 	}
 
-	sessionToken, err := readOAuthPendingSessionCookie(c)
-	if err != nil || strings.TrimSpace(sessionToken) == "" {
-		clearCookies()
-		response.ErrorFrom(c, service.ErrPendingAuthSessionNotFound)
-		return
-	}
-	browserSessionKey, err := readOAuthPendingBrowserCookie(c)
-	if err != nil || strings.TrimSpace(browserSessionKey) == "" {
-		clearCookies()
-		response.ErrorFrom(c, service.ErrPendingAuthBrowserMismatch)
-		return
-	}
-
 	svc, err := h.pendingIdentityService()
 	if err != nil {
 		clearCookies()
@@ -1927,11 +1921,37 @@ func (h *AuthHandler) ExchangePendingOAuthCompletion(c *gin.Context) {
 		return
 	}
 
-	session, err := svc.GetBrowserSession(c.Request.Context(), sessionToken, browserSessionKey)
-	if err != nil {
-		clearCookies()
-		response.ErrorFrom(c, err)
-		return
+	browserSessionKey, _ := readOAuthPendingBrowserCookie(c)
+	browserSessionKey = strings.TrimSpace(browserSessionKey)
+	sessionToken, _ := readOAuthPendingSessionCookie(c)
+	sessionToken = strings.TrimSpace(sessionToken)
+	consumedViaCode := false
+	var session *dbent.PendingAuthSession
+	if code := strings.TrimSpace(adoptionDecision.CompletionCode); code != "" {
+		session, err = svc.ConsumeCompletionCode(c.Request.Context(), code, browserSessionKey)
+		if err != nil {
+			clearCookies()
+			response.ErrorFrom(c, err)
+			return
+		}
+		consumedViaCode = true
+	} else {
+		if sessionToken == "" {
+			clearCookies()
+			response.ErrorFrom(c, service.ErrPendingAuthSessionNotFound)
+			return
+		}
+		if browserSessionKey == "" {
+			clearCookies()
+			response.ErrorFrom(c, service.ErrPendingAuthBrowserMismatch)
+			return
+		}
+		session, err = svc.GetBrowserSession(c.Request.Context(), sessionToken, browserSessionKey)
+		if err != nil {
+			clearCookies()
+			response.ErrorFrom(c, err)
+			return
+		}
 	}
 
 	payload, ok := readCompletionResponse(session.LocalFlowState)
@@ -2041,10 +2061,12 @@ func (h *AuthHandler) ExchangePendingOAuthCompletion(c *gin.Context) {
 		return
 	}
 
-	if _, err := svc.ConsumeBrowserSession(c.Request.Context(), sessionToken, browserSessionKey); err != nil {
-		clearCookies()
-		response.ErrorFrom(c, err)
-		return
+	if !consumedViaCode {
+		if _, err := svc.ConsumeBrowserSession(c.Request.Context(), sessionToken, browserSessionKey); err != nil {
+			clearCookies()
+			response.ErrorFrom(c, err)
+			return
+		}
 	}
 
 	if canIssueTokenPair {
@@ -2055,12 +2077,73 @@ func (h *AuthHandler) ExchangePendingOAuthCompletion(c *gin.Context) {
 			return
 		}
 		h.authService.RecordSuccessfulLogin(c.Request.Context(), loginUser.ID)
+		setRefreshCookie(c, h.cfg, tokenPair.RefreshToken)
 		payload["access_token"] = tokenPair.AccessToken
-		payload["refresh_token"] = tokenPair.RefreshToken
 		payload["expires_in"] = tokenPair.ExpiresIn
 		payload["token_type"] = "Bearer"
+		delete(payload, "refresh_token")
+		if loginUser != nil {
+			payload["user"] = dto.UserFromService(loginUser)
+		}
 	}
 
 	clearCookies()
 	response.Success(c, payload)
+}
+
+func (h *AuthHandler) redirectCompletedOAuthLogin(c *gin.Context, frontendCallback, redirectTo, email string, user *service.User, identity service.PendingAuthIdentityKey, claims map[string]any) {
+	if user == nil {
+		redirectOAuthError(c, frontendCallback, "session_error", "missing user", "")
+		return
+	}
+	svc, err := h.pendingIdentityService()
+	if err != nil {
+		redirectOAuthError(c, frontendCallback, infraerrors.Reason(err), infraerrors.Message(err), "")
+		return
+	}
+	targetID := user.ID
+	session, err := svc.CreatePendingSession(c.Request.Context(), service.CreatePendingAuthSessionInput{
+		Intent:                 oauthIntentLogin,
+		Identity:               identity,
+		TargetUserID:           &targetID,
+		ResolvedEmail:          strings.TrimSpace(email),
+		RedirectTo:             strings.TrimSpace(redirectTo),
+		UpstreamIdentityClaims: claims,
+		LocalFlowState: map[string]any{
+			oauthCompletionResponseKey: map[string]any{},
+		},
+	})
+	if err != nil {
+		redirectOAuthError(c, frontendCallback, "session_error", "failed to create pending auth session", "")
+		return
+	}
+	issued, err := svc.IssueCompletionCode(c.Request.Context(), service.IssuePendingAuthCompletionCodeInput{
+		PendingAuthSessionID: session.ID,
+	})
+	if err != nil {
+		redirectOAuthError(c, frontendCallback, infraerrors.Reason(err), infraerrors.Message(err), "")
+		return
+	}
+	secure := isRequestHTTPS(c)
+	clearOAuthPendingSessionCookie(c, secure)
+	clearOAuthPendingBrowserCookie(c, secure)
+	redirectToFrontendWithCompletionCode(c, frontendCallback, issued.Code, redirectTo)
+}
+
+func redirectToFrontendWithCompletionCode(c *gin.Context, frontendCallback, code, redirectTo string) {
+	u, err := url.Parse(frontendCallback)
+	if err != nil || (u.Scheme != "" && !strings.EqualFold(u.Scheme, "http") && !strings.EqualFold(u.Scheme, "https")) {
+		c.Redirect(http.StatusFound, linuxDoOAuthDefaultRedirectTo)
+		return
+	}
+	q := u.Query()
+	q.Set("completion_code", code)
+	if strings.TrimSpace(redirectTo) != "" {
+		q.Set("redirect", strings.TrimSpace(redirectTo))
+	}
+	u.RawQuery = q.Encode()
+	u.Fragment = ""
+	c.Header("Cache-Control", "no-store")
+	c.Header("Pragma", "no-cache")
+	c.Redirect(http.StatusFound, u.String())
 }

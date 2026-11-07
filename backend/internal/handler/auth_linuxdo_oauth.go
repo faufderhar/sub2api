@@ -366,9 +366,10 @@ func (h *AuthHandler) LinuxDoOAuthCallback(c *gin.Context) {
 				return
 			}
 			h.authService.RecordSuccessfulLogin(c.Request.Context(), user.ID)
-			clearOAuthPendingSessionCookie(c, secureCookie)
-			clearOAuthPendingBrowserCookie(c, secureCookie)
-			redirectOAuthTokenPair(c, frontendCallback, tokenPair, redirectTo)
+			if tokenPair != nil && tokenPair.RefreshToken != "" {
+				_ = h.authService.RevokeRefreshToken(c.Request.Context(), tokenPair.RefreshToken)
+			}
+			h.redirectCompletedOAuthLogin(c, frontendCallback, redirectTo, email, user, identityKey, upstreamClaims)
 			return
 		}
 		if !errors.Is(err, service.ErrOAuthInvitationRequired) {
@@ -608,11 +609,11 @@ func (h *AuthHandler) CompleteLinuxDoOAuthRegistration(c *gin.Context) {
 	clearOAuthPendingSessionCookie(c, secureCookie)
 	clearOAuthPendingBrowserCookie(c, secureCookie)
 
+	setRefreshCookie(c, h.cfg, tokenPair.RefreshToken)
 	c.JSON(http.StatusOK, gin.H{
-		"access_token":  tokenPair.AccessToken,
-		"refresh_token": tokenPair.RefreshToken,
-		"expires_in":    tokenPair.ExpiresIn,
-		"token_type":    "Bearer",
+		"access_token": tokenPair.AccessToken,
+		"expires_in":   tokenPair.ExpiresIn,
+		"token_type":   "Bearer",
 	})
 }
 

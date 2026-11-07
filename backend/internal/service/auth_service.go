@@ -36,6 +36,7 @@ var (
 	ErrRefreshTokenInvalid          = infraerrors.Unauthorized("REFRESH_TOKEN_INVALID", "invalid refresh token")
 	ErrRefreshTokenExpired          = infraerrors.Unauthorized("REFRESH_TOKEN_EXPIRED", "refresh token has expired")
 	ErrRefreshTokenReused           = infraerrors.Unauthorized("REFRESH_TOKEN_REUSED", "refresh token has been reused")
+	ErrRefreshTokenMissing          = infraerrors.Unauthorized("REFRESH_TOKEN_MISSING", "refresh token cookie is missing")
 	ErrEmailVerifyRequired          = infraerrors.BadRequest("EMAIL_VERIFY_REQUIRED", "email verification is required")
 	ErrEmailSuffixNotAllowed        = infraerrors.BadRequest("EMAIL_SUFFIX_NOT_ALLOWED", "email suffix is not allowed")
 	ErrEmailDomainRegistrationLimit = infraerrors.BadRequest(
@@ -1482,6 +1483,13 @@ func (s *AuthService) GetAccessTokenExpiresIn() int {
 	return s.cfg.JWT.ExpireHour * 3600
 }
 
+func (s *AuthService) Config() *config.Config {
+	if s == nil {
+		return nil
+	}
+	return s.cfg
+}
+
 // HashPassword 使用bcrypt加密密码
 func (s *AuthService) HashPassword(password string) (string, error) {
 	hashedBytes, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
@@ -1773,12 +1781,13 @@ func (s *AuthService) generateRefreshToken(ctx context.Context, user *User, fami
 	ttl := time.Duration(s.cfg.JWT.RefreshTokenExpireDays) * 24 * time.Hour
 
 	data := &RefreshTokenData{
-		UserID:       user.ID,
-		TokenVersion: resolvedTokenVersion(user),
-		FamilyID:     familyID,
-		BindingHash:  sessionBindingHashFromContext(ctx),
-		CreatedAt:    now,
-		ExpiresAt:    now.Add(ttl),
+		UserID:          user.ID,
+		TokenVersion:    resolvedTokenVersion(user),
+		FamilyID:        familyID,
+		BindingHash:     sessionBindingHashFromContext(ctx),
+		CreatedAt:       now,
+		ExpiresAt:       now.Add(ttl),
+		IssuedViaCookie: true,
 	}
 
 	// 存储Token数据
@@ -1820,12 +1829,22 @@ func (s *AuthService) RefreshTokenPair(ctx context.Context, refreshToken string)
 	data, err := s.refreshTokenCache.GetRefreshToken(ctx, tokenHash)
 	if err != nil {
 		if errors.Is(err, ErrRefreshTokenNotFound) {
-			// Token不存在，可能是已被使用（Token轮转）或已过期
-			logger.LegacyPrintf("service.auth", "[Auth] Refresh token not found, possible reuse attack")
+			if pair, ok := s.lookupRefreshRotationGrace(ctx, tokenHash); ok {
+				return pair, nil
+			}
+			if familyID, ok := s.lookupRefreshReplacement(ctx, tokenHash); ok {
+				_ = s.refreshTokenCache.DeleteTokenFamily(ctx, familyID)
+				return nil, ErrRefreshTokenReused
+			}
+			logger.LegacyPrintf("service.auth", "[Auth] Refresh token not found")
 			return nil, ErrRefreshTokenInvalid
 		}
 		logger.LegacyPrintf("service.auth", "[Auth] Error getting refresh token: %v", err)
 		return nil, ErrServiceUnavailable
+	}
+	if !data.IssuedViaCookie {
+		_ = s.refreshTokenCache.DeleteRefreshToken(ctx, tokenHash)
+		return nil, ErrRefreshTokenInvalid
 	}
 
 	// 检查Token是否过期
@@ -1871,21 +1890,81 @@ func (s *AuthService) RefreshTokenPair(ctx context.Context, refreshToken string)
 		}
 	}
 
-	// Token轮转：立即使旧Token失效
-	if err := s.refreshTokenCache.DeleteRefreshToken(ctx, tokenHash); err != nil {
-		logger.LegacyPrintf("service.auth", "[Auth] Failed to delete old refresh token: %v", err)
-		// 继续处理，不影响主流程
-	}
-
 	// 生成新的Token对，保持同一个家族ID
 	pair, err := s.GenerateTokenPair(ctx, user, data.FamilyID)
 	if err != nil {
 		return nil, err
 	}
+	s.recordRefreshRotation(ctx, tokenHash, data, user.Role, pair)
+	if err := s.refreshTokenCache.DeleteRefreshToken(ctx, tokenHash); err != nil {
+		logger.LegacyPrintf("service.auth", "[Auth] Failed to delete old refresh token: %v", err)
+	}
 	return &TokenPairWithUser{
 		TokenPair: *pair,
 		UserRole:  user.Role,
 	}, nil
+}
+
+const (
+	refreshRotationGracePeriod = 10 * time.Second
+	refreshGraceKeyPrefix      = "grace:"
+	refreshReplacedKeyPrefix   = "replaced:"
+)
+
+func refreshGraceKey(tokenHash string) string    { return refreshGraceKeyPrefix + tokenHash }
+func refreshReplacedKey(tokenHash string) string { return refreshReplacedKeyPrefix + tokenHash }
+
+func (s *AuthService) recordRefreshRotation(ctx context.Context, oldHash string, old *RefreshTokenData, role string, pair *TokenPair) {
+	if s.refreshTokenCache == nil || old == nil || pair == nil {
+		return
+	}
+	now := time.Now()
+	grace := &RefreshTokenData{
+		UserID:                old.UserID,
+		FamilyID:              old.FamilyID,
+		ReplacedAt:            now,
+		SuccessorAccessToken:  pair.AccessToken,
+		SuccessorRefreshToken: pair.RefreshToken,
+		SuccessorExpiresIn:    pair.ExpiresIn,
+		SuccessorUserRole:     role,
+	}
+	if err := s.refreshTokenCache.StoreRefreshToken(ctx, refreshGraceKey(oldHash), grace, refreshRotationGracePeriod); err != nil {
+		logger.LegacyPrintf("service.auth", "[Auth] Failed to store refresh rotation grace: %v", err)
+	}
+	replacedTTL := time.Until(old.ExpiresAt)
+	if replacedTTL < refreshRotationGracePeriod {
+		replacedTTL = refreshRotationGracePeriod
+	}
+	replaced := &RefreshTokenData{UserID: old.UserID, FamilyID: old.FamilyID, ReplacedAt: now}
+	if err := s.refreshTokenCache.StoreRefreshToken(ctx, refreshReplacedKey(oldHash), replaced, replacedTTL); err != nil {
+		logger.LegacyPrintf("service.auth", "[Auth] Failed to store refresh replacement marker: %v", err)
+	}
+}
+
+func (s *AuthService) lookupRefreshRotationGrace(ctx context.Context, tokenHash string) (*TokenPairWithUser, bool) {
+	data, err := s.refreshTokenCache.GetRefreshToken(ctx, refreshGraceKey(tokenHash))
+	if err != nil || data == nil || data.SuccessorRefreshToken == "" {
+		return nil, false
+	}
+	if !data.ReplacedAt.IsZero() && time.Since(data.ReplacedAt) > refreshRotationGracePeriod {
+		return nil, false
+	}
+	return &TokenPairWithUser{
+		TokenPair: TokenPair{
+			AccessToken:  data.SuccessorAccessToken,
+			RefreshToken: data.SuccessorRefreshToken,
+			ExpiresIn:    data.SuccessorExpiresIn,
+		},
+		UserRole: data.SuccessorUserRole,
+	}, true
+}
+
+func (s *AuthService) lookupRefreshReplacement(ctx context.Context, tokenHash string) (string, bool) {
+	data, err := s.refreshTokenCache.GetRefreshToken(ctx, refreshReplacedKey(tokenHash))
+	if err != nil || data == nil || data.FamilyID == "" {
+		return "", false
+	}
+	return data.FamilyID, true
 }
 
 // RevokeRefreshToken 撤销单个Refresh Token

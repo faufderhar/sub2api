@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -76,6 +77,13 @@ func TestSetOAuthPendingSessionCookieUsesProviderCompletionPathPrefix(t *testing
 	require.Equal(t, "/api/v1/auth/oauth", cookie.Path)
 }
 
+func newPendingExchangeRequest(body io.Reader) *http.Request {
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oauth/pending/exchange", body)
+	req.Header.Set("Origin", "http://example.com")
+	req.Header.Set("Content-Type", "application/json")
+	return req
+}
+
 func TestExchangePendingOAuthCompletionPreviewThenFinalizeAppliesAdoptionDecision(t *testing.T) {
 	handler, client := newOAuthPendingFlowTestHandler(t, false)
 	ctx := context.Background()
@@ -115,7 +123,7 @@ func TestExchangePendingOAuthCompletionPreviewThenFinalizeAppliesAdoptionDecisio
 
 	previewRecorder := httptest.NewRecorder()
 	previewCtx, _ := gin.CreateTestContext(previewRecorder)
-	previewReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oauth/pending/exchange", nil)
+	previewReq := newPendingExchangeRequest(nil)
 	previewReq.AddCookie(&http.Cookie{Name: oauthPendingSessionCookieName, Value: encodeCookieValue(session.SessionToken)})
 	previewReq.AddCookie(&http.Cookie{Name: oauthPendingBrowserCookieName, Value: encodeCookieValue("browser-session-key")})
 	previewCtx.Request = previewReq
@@ -141,7 +149,7 @@ func TestExchangePendingOAuthCompletionPreviewThenFinalizeAppliesAdoptionDecisio
 	body := bytes.NewBufferString(`{"adopt_display_name":true,"adopt_avatar":true}`)
 	finalizeRecorder := httptest.NewRecorder()
 	finalizeCtx, _ := gin.CreateTestContext(finalizeRecorder)
-	finalizeReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oauth/pending/exchange", body)
+	finalizeReq := newPendingExchangeRequest(body)
 	finalizeReq.Header.Set("Content-Type", "application/json")
 	finalizeReq.AddCookie(&http.Cookie{Name: oauthPendingSessionCookieName, Value: encodeCookieValue(session.SessionToken)})
 	finalizeReq.AddCookie(&http.Cookie{Name: oauthPendingBrowserCookieName, Value: encodeCookieValue("browser-session-key")})
@@ -228,7 +236,7 @@ func TestExchangePendingOAuthCompletionSkipsInvalidAvatarAdoptionWithoutBlocking
 	body := bytes.NewBufferString(`{"adopt_display_name":true,"adopt_avatar":true}`)
 	recorder := httptest.NewRecorder()
 	ginCtx, _ := gin.CreateTestContext(recorder)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oauth/pending/exchange", body)
+	req := newPendingExchangeRequest(body)
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(&http.Cookie{Name: oauthPendingSessionCookieName, Value: encodeCookieValue(session.SessionToken)})
 	req.AddCookie(&http.Cookie{Name: oauthPendingBrowserCookieName, Value: encodeCookieValue("browser-invalid-avatar-key")})
@@ -299,7 +307,7 @@ func TestExchangePendingOAuthCompletionBindCurrentUserPreviewThenFinalizeBindsId
 
 	previewRecorder := httptest.NewRecorder()
 	previewCtx, _ := gin.CreateTestContext(previewRecorder)
-	previewReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oauth/pending/exchange", nil)
+	previewReq := newPendingExchangeRequest(nil)
 	previewReq.AddCookie(&http.Cookie{Name: oauthPendingSessionCookieName, Value: encodeCookieValue(session.SessionToken)})
 	previewReq.AddCookie(&http.Cookie{Name: oauthPendingBrowserCookieName, Value: encodeCookieValue("bind-browser-session-key")})
 	previewCtx.Request = previewReq
@@ -331,7 +339,7 @@ func TestExchangePendingOAuthCompletionBindCurrentUserPreviewThenFinalizeBindsId
 	body := bytes.NewBufferString(`{"adopt_display_name":false,"adopt_avatar":false}`)
 	finalizeRecorder := httptest.NewRecorder()
 	finalizeCtx, _ := gin.CreateTestContext(finalizeRecorder)
-	finalizeReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oauth/pending/exchange", body)
+	finalizeReq := newPendingExchangeRequest(body)
 	finalizeReq.Header.Set("Content-Type", "application/json")
 	finalizeReq.AddCookie(&http.Cookie{Name: oauthPendingSessionCookieName, Value: encodeCookieValue(session.SessionToken)})
 	finalizeReq.AddCookie(&http.Cookie{Name: oauthPendingBrowserCookieName, Value: encodeCookieValue("bind-browser-session-key")})
@@ -433,7 +441,7 @@ func TestExchangePendingOAuthCompletionBindCurrentUserOwnershipConflict(t *testi
 	body := bytes.NewBufferString(`{"adopt_display_name":false,"adopt_avatar":false}`)
 	recorder := httptest.NewRecorder()
 	ginCtx, _ := gin.CreateTestContext(recorder)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oauth/pending/exchange", body)
+	req := newPendingExchangeRequest(body)
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(&http.Cookie{Name: oauthPendingSessionCookieName, Value: encodeCookieValue(session.SessionToken)})
 	req.AddCookie(&http.Cookie{Name: oauthPendingBrowserCookieName, Value: encodeCookieValue("bind-conflict-browser-session-key")})
@@ -502,7 +510,7 @@ func TestExchangePendingOAuthCompletionLoginFalseFalseBindsIdentityWithoutAdopti
 	body := bytes.NewBufferString(`{"adopt_display_name":false,"adopt_avatar":false}`)
 	recorder := httptest.NewRecorder()
 	ginCtx, _ := gin.CreateTestContext(recorder)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oauth/pending/exchange", body)
+	req := newPendingExchangeRequest(body)
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(&http.Cookie{Name: oauthPendingSessionCookieName, Value: encodeCookieValue(session.SessionToken)})
 	req.AddCookie(&http.Cookie{Name: oauthPendingBrowserCookieName, Value: encodeCookieValue("login-false-browser-session-key")})
@@ -618,7 +626,7 @@ func TestExchangePendingOAuthCompletionLoginReassignsExistingDecisionIdentityRef
 	body := bytes.NewBufferString(`{"adopt_display_name":false,"adopt_avatar":false}`)
 	recorder := httptest.NewRecorder()
 	ginCtx, _ := gin.CreateTestContext(recorder)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oauth/pending/exchange", body)
+	req := newPendingExchangeRequest(body)
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(&http.Cookie{Name: oauthPendingSessionCookieName, Value: encodeCookieValue(session.SessionToken)})
 	req.AddCookie(&http.Cookie{Name: oauthPendingBrowserCookieName, Value: encodeCookieValue("login-reassign-browser-session-key")})
@@ -682,7 +690,7 @@ func TestExchangePendingOAuthCompletionLoginWithoutDecisionStillBindsIdentity(t 
 
 	recorder := httptest.NewRecorder()
 	ginCtx, _ := gin.CreateTestContext(recorder)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oauth/pending/exchange", nil)
+	req := newPendingExchangeRequest(nil)
 	req.AddCookie(&http.Cookie{Name: oauthPendingSessionCookieName, Value: encodeCookieValue(session.SessionToken)})
 	req.AddCookie(&http.Cookie{Name: oauthPendingBrowserCookieName, Value: encodeCookieValue("login-nodecision-browser-session-key")})
 	ginCtx.Request = req
@@ -760,7 +768,7 @@ func TestExchangePendingOAuthCompletionExistingLoginWithSuggestedProfileSkipsAdo
 
 	recorder := httptest.NewRecorder()
 	ginCtx, _ := gin.CreateTestContext(recorder)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oauth/pending/exchange", nil)
+	req := newPendingExchangeRequest(nil)
 	req.AddCookie(&http.Cookie{Name: oauthPendingSessionCookieName, Value: encodeCookieValue(session.SessionToken)})
 	req.AddCookie(&http.Cookie{Name: oauthPendingBrowserCookieName, Value: encodeCookieValue("existing-login-browser-session-key")})
 	ginCtx.Request = req
@@ -771,9 +779,8 @@ func TestExchangePendingOAuthCompletionExistingLoginWithSuggestedProfileSkipsAdo
 
 	payload := decodeJSONResponseData(t, recorder)
 	require.NotEmpty(t, payload["access_token"])
-	require.NotEmpty(t, payload["refresh_token"])
+	require.NotContains(t, payload, "refresh_token")
 	require.NotEqual(t, "legacy-access-token", payload["access_token"])
-	require.NotEqual(t, "legacy-refresh-token", payload["refresh_token"])
 	require.Equal(t, "/dashboard", payload["redirect"])
 	require.Equal(t, "Existing Login Example", payload["suggested_display_name"])
 	require.Equal(t, "https://cdn.example/existing-login.png", payload["suggested_avatar_url"])
@@ -846,7 +853,7 @@ func TestExchangePendingOAuthCompletionBlocksBackendModeBeforeReturningTokenPayl
 
 	recorder := httptest.NewRecorder()
 	ginCtx, _ := gin.CreateTestContext(recorder)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oauth/pending/exchange", nil)
+	req := newPendingExchangeRequest(nil)
 	req.AddCookie(&http.Cookie{Name: oauthPendingSessionCookieName, Value: encodeCookieValue(session.SessionToken)})
 	req.AddCookie(&http.Cookie{Name: oauthPendingBrowserCookieName, Value: encodeCookieValue("blocked-backend-mode-browser-session-key")})
 	ginCtx.Request = req
@@ -896,7 +903,7 @@ func TestExchangePendingOAuthCompletionRejectsDisabledTargetUser(t *testing.T) {
 
 	recorder := httptest.NewRecorder()
 	ginCtx, _ := gin.CreateTestContext(recorder)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oauth/pending/exchange", nil)
+	req := newPendingExchangeRequest(nil)
 	req.AddCookie(&http.Cookie{Name: oauthPendingSessionCookieName, Value: encodeCookieValue(session.SessionToken)})
 	req.AddCookie(&http.Cookie{Name: oauthPendingBrowserCookieName, Value: encodeCookieValue("disabled-linked-browser-session-key")})
 	ginCtx.Request = req
@@ -961,7 +968,7 @@ func TestExchangePendingOAuthCompletionChoiceStateDoesNotBindIdentity(t *testing
 	body := bytes.NewBufferString(`{"adopt_display_name":true,"adopt_avatar":true}`)
 	recorder := httptest.NewRecorder()
 	ginCtx, _ := gin.CreateTestContext(recorder)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oauth/pending/exchange", body)
+	req := newPendingExchangeRequest(body)
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(&http.Cookie{Name: oauthPendingSessionCookieName, Value: encodeCookieValue(session.SessionToken)})
 	req.AddCookie(&http.Cookie{Name: oauthPendingBrowserCookieName, Value: encodeCookieValue("choice-state-attack-browser-session-key")})
@@ -1039,7 +1046,7 @@ func TestExchangePendingOAuthCompletionInvitationRequiredFalseFalsePersistsDecis
 	body := bytes.NewBufferString(`{"adopt_display_name":false,"adopt_avatar":false}`)
 	recorder := httptest.NewRecorder()
 	ginCtx, _ := gin.CreateTestContext(recorder)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oauth/pending/exchange", body)
+	req := newPendingExchangeRequest(body)
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(&http.Cookie{Name: oauthPendingSessionCookieName, Value: encodeCookieValue(session.SessionToken)})
 	req.AddCookie(&http.Cookie{Name: oauthPendingBrowserCookieName, Value: encodeCookieValue("invitation-required-browser-session-key")})
@@ -1114,7 +1121,7 @@ func TestCreateOIDCOAuthAccountCreatesUserBindsIdentityAndConsumesSession(t *tes
 	var payload map[string]any
 	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &payload))
 	require.NotEmpty(t, payload["access_token"])
-	require.NotEmpty(t, payload["refresh_token"])
+	require.NotContains(t, payload, "refresh_token")
 	require.Equal(t, "Bearer", payload["token_type"])
 
 	createdUser, err := client.User.Query().Where(dbuser.EmailEQ("fresh@example.com")).Only(ctx)
@@ -1904,7 +1911,7 @@ func TestBindOIDCOAuthLoginBindsExistingUserAndConsumesSession(t *testing.T) {
 	var payload map[string]any
 	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &payload))
 	require.NotEmpty(t, payload["access_token"])
-	require.NotEmpty(t, payload["refresh_token"])
+	require.NotContains(t, payload, "refresh_token")
 	require.Equal(t, "Bearer", payload["token_type"])
 
 	identity, err := client.AuthIdentity.Query().
@@ -2437,7 +2444,7 @@ func TestLogin2FACompletesPendingOAuthBindAndConsumesSession(t *testing.T) {
 	require.Equal(t, http.StatusOK, recorder.Code)
 	payload := decodeJSONResponseData(t, recorder)
 	require.NotEmpty(t, payload["access_token"])
-	require.NotEmpty(t, payload["refresh_token"])
+	require.NotContains(t, payload, "refresh_token")
 	accessToken, ok := payload["access_token"].(string)
 	require.True(t, ok)
 	claims, err := handler.authService.ValidateToken(accessToken)
