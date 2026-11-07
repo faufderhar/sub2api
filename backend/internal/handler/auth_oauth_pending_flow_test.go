@@ -1698,8 +1698,9 @@ func TestLogoutClearsPendingOAuthAndBindCookies(t *testing.T) {
 
 	recorder := httptest.NewRecorder()
 	ginCtx, _ := gin.CreateTestContext(recorder)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/logout", bytes.NewBufferString(`{}`))
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/api/v1/auth/logout", bytes.NewBufferString(`{}`))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", "http://example.com")
 	req.AddCookie(&http.Cookie{Name: oauthPendingSessionCookieName, Value: encodeCookieValue("pending-session-token")})
 	req.AddCookie(&http.Cookie{Name: oauthPendingBrowserCookieName, Value: encodeCookieValue("pending-browser-key")})
 	req.AddCookie(&http.Cookie{Name: oauthBindAccessTokenCookieName, Value: "bind-token"})
