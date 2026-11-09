@@ -175,7 +175,8 @@ async function decide(approved: boolean): Promise<void> {
         throw error
       }
     }
-    const result = approved && input.scope === 'admin' ? await stepUp.run(action) : await action()
+    // R3-STEP：只读与写权限授权都包 stepUp.run；拒绝授权不弹二次验证
+    const result = approved ? await stepUp.run(action) : await action()
     if (current !== generation) return
     const destination = new URL(result.redirect_url)
     if (destination.origin !== expectedRedirect.origin || destination.pathname !== expectedRedirect.pathname ||

@@ -60,11 +60,16 @@ describe('refreshAuthTokens', () => {
     const second = refreshAuthTokens({ failedAccessToken: 'old-access' })
 
     expect(mockedPost).toHaveBeenCalledTimes(1)
+    expect(mockedPost).toHaveBeenCalledWith(
+      expect.stringContaining('/auth/refresh'),
+      {},
+      expect.objectContaining({ withCredentials: true })
+    )
     resolveRequest(refreshedResponse())
 
     await expect(first).resolves.toMatchObject({ access_token: 'new-access' })
-    await expect(second).resolves.toMatchObject({ refresh_token: 'new-refresh' })
-    expect(localStorage.getItem('refresh_token')).toBe('new-refresh')
+    await expect(second).resolves.toMatchObject({ access_token: 'new-access' })
+    expect(localStorage.getItem('refresh_token')).toBeNull()
   })
 
   it('adopts tokens refreshed by another tab after acquiring the Web Lock', async () => {
@@ -86,8 +91,7 @@ describe('refreshAuthTokens', () => {
     expect(request).toHaveBeenCalledTimes(1)
     expect(mockedPost).not.toHaveBeenCalled()
     expect(result).toMatchObject({
-      access_token: 'peer-access',
-      refresh_token: 'peer-refresh'
+      access_token: 'peer-access'
     })
   })
 
@@ -122,8 +126,7 @@ describe('refreshAuthTokens', () => {
     await expect(
       refreshAuthTokens({ failedAccessToken: 'old-access' })
     ).resolves.toMatchObject({
-      access_token: 'peer-access',
-      refresh_token: 'peer-refresh'
+      access_token: 'peer-access'
     })
   })
 
@@ -148,9 +151,9 @@ describe('refreshAuthTokens', () => {
     await vi.advanceTimersByTimeAsync(1_600)
 
     await expect(winner).resolves.toMatchObject({ access_token: 'new-access' })
-    await expect(loser).resolves.toMatchObject({ refresh_token: 'new-refresh' })
+    await expect(loser).resolves.toMatchObject({ access_token: 'new-access' })
     expect(mockedPost).toHaveBeenCalledTimes(2)
-    expect(localStorage.getItem('refresh_token')).toBe('new-refresh')
+    expect(localStorage.getItem('refresh_token')).toBeNull()
   })
 
   it('does not adopt a token from a different signed-in user', async () => {

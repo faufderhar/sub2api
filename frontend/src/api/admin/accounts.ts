@@ -1134,8 +1134,63 @@ export async function refreshOpenCodeGoUsage(id: number): Promise<OpenCodeGoUsag
   return data
 }
 
+export type FingerprintSource = 'created' | 'migrated_redis' | 'migrated_generated' | 'regenerated'
+export type TlsBinding = 'explicit' | 'auto'
+
+export interface FingerprintSummary {
+  applicable: boolean
+  regenerable: boolean
+  generation?: number
+  source?: FingerprintSource
+  user_agent?: string
+  os?: string
+  arch?: string
+  runtime?: string
+  runtime_version?: string
+  client_id_prefix?: string
+  tls_profile_id?: number | null
+  tls_profile_name?: string
+  tls_binding?: TlsBinding
+  updated_at?: string
+  account_uuid_present?: boolean
+  account_uuid_changed?: boolean
+  passthrough_user_id?: boolean
+  conflict?: boolean
+  reason?: 'FINGERPRINT_NOT_APPLICABLE'
+  message?: string
+}
+
+export interface RegenerateFingerprintRequest {
+  confirm: true
+  expected_generation: number
+}
+
+export async function getFingerprint(id: number): Promise<FingerprintSummary> {
+  const { data } = await apiClient.get<FingerprintSummary>(`/admin/accounts/${id}/fingerprint`)
+  return data
+}
+
+export async function regenerateFingerprint(
+  id: number,
+  body: RegenerateFingerprintRequest,
+  options?: { idempotencyKey?: string }
+): Promise<FingerprintSummary> {
+  const headers: Record<string, string> = {}
+  if (options?.idempotencyKey) {
+    headers['Idempotency-Key'] = options.idempotencyKey
+  }
+  const { data } = await apiClient.post<FingerprintSummary>(
+    `/admin/accounts/${id}/fingerprint/regenerate`,
+    body,
+    { headers }
+  )
+  return data
+}
+
 export const accountsAPI = {
   list,
+  getFingerprint,
+  regenerateFingerprint,
   listWithEtag,
   getUpstreamBillingRatesWithEtag,
   getById,

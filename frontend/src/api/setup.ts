@@ -158,13 +158,18 @@ export type SetupTokenTranslate = (
 ) => string
 
 /**
- * FD2-14 / FD2-17: map SETUP_TOKEN_* (and bare 429) to frontend i18n copy.
+ * FD2-14 / FD2-17 / R3-SETUP (FD2-18): map known SETUP_TOKEN_* reasons
+ * (and a bare HTTP 429 with no reason) to frontend i18n copy.
  * Never surface the backend `message` for these cases (locale may differ).
  *
- * FD2-17: RATE_LIMITED / HTTP 429 use the seconds template only when
+ * FD2-17: RATE_LIMITED / bare HTTP 429 use the seconds template only when
  * `retryAfter` is a number > 0; otherwise use `rateLimitedNoWait`.
- * A 429 with no `reason` is still treated as rate-limited (restores the
+ * A 429 with no `reason` is still treated as setup rate-limited (restores the
  * pre-bac3c2da1 `status === 429` path that FD2-14 accidentally narrowed).
+ *
+ * FD2-18: a present non-setup `reason` (e.g. TOTP_TOO_MANY_ATTEMPTS) must
+ * return null even when `status === 429`, so the generic error chain can
+ * handle it instead of showing install-wizard rate-limit copy.
  */
 export function setupTokenUserMessage(
   err: { reason?: string; retryAfter?: number; status?: number },
@@ -176,12 +181,21 @@ export function setupTokenUserMessage(
   if (err.reason === SETUP_TOKEN_INVALID) {
     return t('setup.setupToken.invalid')
   }
-  const rateLimited =
-    err.reason === SETUP_TOKEN_RATE_LIMITED || err.status === 429
-  if (!rateLimited) return null
-  const seconds = err.retryAfter
-  if (typeof seconds === 'number' && seconds > 0) {
-    return t('setup.setupToken.rateLimited', { seconds })
+  if (err.reason === SETUP_TOKEN_RATE_LIMITED) {
+    return setupTokenRateLimitedCopy(err.retryAfter, t)
+  }
+  // FD2-18: unknown / other reasons are not setup-token errors.
+  if (err.reason) return null
+  if (err.status !== 429) return null
+  return setupTokenRateLimitedCopy(err.retryAfter, t)
+}
+
+function setupTokenRateLimitedCopy(
+  retryAfter: number | undefined,
+  t: SetupTokenTranslate
+): string {
+  if (typeof retryAfter === 'number' && retryAfter > 0) {
+    return t('setup.setupToken.rateLimited', { seconds: retryAfter })
   }
   return t('setup.setupToken.rateLimitedNoWait')
 }

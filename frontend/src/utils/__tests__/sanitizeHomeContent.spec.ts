@@ -43,7 +43,7 @@ describe('sanitizeHomeContent (L-1)', () => {
     )
     const iframe = new DOMParser().parseFromString(out, 'text/html').querySelector('iframe')!
     expect(iframe.getAttribute('src')).toBe('https://example.com/embed')
-    expect(iframe.getAttribute('sandbox')).toBe('allow-scripts allow-same-origin')
+    expect(iframe.getAttribute('sandbox')).toBe('allow-scripts')
     expect(iframe.getAttribute('allow')).toBe('autoplay; fullscreen; picture-in-picture')
     expect(iframe.getAttribute('referrerpolicy')).toBe('strict-origin-when-cross-origin')
     expect(iframe.getAttribute('loading')).toBe('lazy')
@@ -138,7 +138,7 @@ describe('sanitizeHomeContent (L-1)', () => {
       expect(f.getAttribute('height')).toBe('315')
       expect(f.getAttribute('frameborder')).toBe('0')
       expect(f.hasAttribute('allowfullscreen')).toBe(true)
-      expect(f.getAttribute('sandbox')).toBe('allow-scripts allow-same-origin')
+      expect(f.getAttribute('sandbox')).toBe('allow-scripts')
       expect(f.getAttribute('allow')).toBe('autoplay; fullscreen; picture-in-picture')
       expect(f.getAttribute('referrerpolicy')).toBe('strict-origin-when-cross-origin')
       expect(f.getAttribute('loading')).toBe('lazy')
@@ -211,7 +211,7 @@ describe('sanitizeHomeContent (L-1)', () => {
   })
 
 
-  describe('A-1：同源 iframe 去掉 allow-same-origin', () => {
+  describe('A-1 / R3-IFRAME：所有不可信 iframe 都不含 allow-same-origin', () => {
     const NO_SAME = HOME_IFRAME_SANDBOX_DEFAULT.filter((t) => t !== 'allow-same-origin').join(' ')
     const pageOrigin = 'https://app.test'
     const pageHref = 'https://app.test/admin/settings'
@@ -248,10 +248,20 @@ describe('sanitizeHomeContent (L-1)', () => {
       expect(iframe.getAttribute('sandbox')).not.toContain('allow-same-origin')
     })
 
-    it('跨域 https 仍保留默认 allow-same-origin', () => {
+    it('跨域 https 也不带 allow-same-origin（不依赖初始 src）', () => {
       const out = sanitizeHomeContent('<iframe src="https://example.com/embed"></iframe>')
       const iframe = new DOMParser().parseFromString(out, 'text/html').querySelector('iframe')!
-      expect(iframe.getAttribute('sandbox')).toContain('allow-same-origin')
+      expect(iframe.getAttribute('sandbox')).toBe(NO_SAME)
+      expect(iframe.getAttribute('sandbox')).not.toContain('allow-same-origin')
+    })
+
+    it('管理员自写 sandbox 含 allow-same-origin 时跨域也被去掉', () => {
+      const out = sanitizeHomeContent(
+        '<iframe src="https://example.com/embed" sandbox="allow-scripts allow-same-origin allow-forms"></iframe>'
+      )
+      const iframe = new DOMParser().parseFromString(out, 'text/html').querySelector('iframe')!
+      expect(iframe.getAttribute('sandbox')).toBe('allow-scripts allow-forms')
+      expect(iframe.getAttribute('sandbox')).not.toContain('allow-same-origin')
     })
 
     it('管理员自写 sandbox 含 allow-same-origin 时同源仍被去掉', () => {
@@ -264,14 +274,15 @@ describe('sanitizeHomeContent (L-1)', () => {
       expect(iframe.getAttribute('sandbox')).not.toContain('allow-same-origin')
     })
 
-    it('resolveHomeIframeSandbox 对同源 src 去掉 allow-same-origin', () => {
+    it('resolveHomeIframeSandbox 对任意 src 都去掉 allow-same-origin', () => {
       expect(resolveHomeIframeSandbox(null, '/x')).toBe(NO_SAME)
       expect(resolveHomeIframeSandbox(null, `${pageOrigin}/x`)).toBe(NO_SAME)
-      expect(resolveHomeIframeSandbox(null, 'https://example.com/x')).toBe(
-        HOME_IFRAME_SANDBOX_DEFAULT.join(' ')
-      )
+      expect(resolveHomeIframeSandbox(null, 'https://example.com/x')).toBe(NO_SAME)
       expect(
         resolveHomeIframeSandbox('allow-scripts allow-same-origin', '/x')
+      ).toBe('allow-scripts')
+      expect(
+        resolveHomeIframeSandbox('allow-scripts allow-same-origin', 'https://example.com/x')
       ).toBe('allow-scripts')
     })
   })

@@ -25,6 +25,7 @@
         ></textarea>
         <p class="input-hint">{{ t('admin.accounts.notesHint') }}</p>
       </div>
+      <AccountFingerprintPanel v-if="account.id" :account-id="account.id" />
 
       <!-- API Key fields (only for apikey type) -->
       <div v-if="account.type === 'apikey'" class="space-y-4">
@@ -3425,6 +3426,7 @@ import {
 import OpenCodeGoProtocolRulesEditor from '@/components/account/OpenCodeGoProtocolRulesEditor.vue'
 import HeaderOverrideEditor from '@/components/account/HeaderOverrideEditor.vue'
 import OllamaCloudUsageSettings from '@/components/account/OllamaCloudUsageSettings.vue'
+import AccountFingerprintPanel from '@/components/account/AccountFingerprintPanel.vue'
 import {
   applyAntigravityProjectID,
   applyHeaderOverride,

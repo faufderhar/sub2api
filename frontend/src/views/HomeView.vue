@@ -531,7 +531,7 @@ const homeContentEmbedUrl = computed(() => {
   const content = homeContent.value.trim()
   return isHomeContentUrl.value && isHttpsAbsoluteUrl(content) ? content : ''
 })
-// F-1 / A-1：URL 模式整页嵌入用默认 sandbox；同源时去掉 allow-same-origin
+// F-1 / A-1 / R3-IFRAME：URL 模式整页嵌入用默认 sandbox；永不带 allow-same-origin
 const homeIframeSandbox = computed(() => resolveHomeIframeSandbox(null, homeContentEmbedUrl.value || homeContent.value.trim()))
 
 // Theme

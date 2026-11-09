@@ -24,6 +24,8 @@ vi.mock('@/api/admin', () => ({
   adminAPI: {
     accounts: {
       update: updateAccountMock,
+      getFingerprint: vi.fn().mockResolvedValue({ applicable: false, regenerable: false }),
+      regenerateFingerprint: vi.fn(),
       getGrokMediaEligibility: getEligibilityMock,
       updateGrokMediaEligibility: updateEligibilityMock,
       checkMixedChannelRisk: vi.fn().mockResolvedValue({ has_risk: false })

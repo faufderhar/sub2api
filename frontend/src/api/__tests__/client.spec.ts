@@ -311,16 +311,19 @@ describe('API Client', () => {
   // --- 401 Token 刷新 ---
 
   describe('401 Token 刷新', () => {
-    it('无 refresh_token 时 401 清除 localStorage', async () => {
+    it('cookie 刷新返回 REFRESH_TOKEN_MISSING 时清除会话并回登录', async () => {
+      window.history.replaceState({}, '', '/dashboard')
       localStorage.setItem('auth_token', 'expired-token')
-      // 不设置 refresh_token
+      localStorage.setItem('auth_user', JSON.stringify({ id: 7 }))
 
-      // Mock window.location
-      const originalLocation = window.location
-      Object.defineProperty(window, 'location', {
-        value: { ...originalLocation, pathname: '/dashboard', href: '/dashboard' },
-        writable: true,
+      const refreshError = Object.assign(new axios.AxiosError('missing cookie'), {
+        response: {
+          status: 401,
+          data: { reason: 'REFRESH_TOKEN_MISSING', message: '未登录或会话已失效' },
+        }
       })
+      const refresh = await import('@/api/tokenRefresh')
+      vi.spyOn(refresh, 'refreshAuthTokens').mockRejectedValueOnce(refreshError)
 
       const adapter = vi.fn().mockRejectedValue({
         response: {
@@ -335,18 +338,15 @@ describe('API Client', () => {
       })
       apiClient.defaults.adapter = adapter
 
-      await expect(apiClient.get('/test')).rejects.toBeDefined()
-
-      expect(localStorage.getItem('auth_token')).toBeNull()
-
-      // 恢复 location
-      Object.defineProperty(window, 'location', {
-        value: originalLocation,
-        writable: true,
+      await expect(apiClient.get('/test')).rejects.toMatchObject({
+        reason: 'REFRESH_TOKEN_MISSING'
       })
+      expect(localStorage.getItem('auth_token')).toBeNull()
+      expect(localStorage.getItem('auth_user')).toBeNull()
+      window.history.replaceState({}, '', '/')
     })
 
-    it('有 refresh_token 时刷新并重试原请求', async () => {
+    it('有登录态时用 cookie 刷新并重试原请求', async () => {
       localStorage.setItem('auth_token', 'expired-token')
       localStorage.setItem('refresh_token', 'refresh-token')
       localStorage.setItem('token_expires_at', String(Date.now() - 1))
@@ -389,7 +389,7 @@ describe('API Client', () => {
 
       expect(adapter).toHaveBeenCalledTimes(2)
       expect(localStorage.getItem('auth_token')).toBe('new-token')
-      expect(localStorage.getItem('refresh_token')).toBe('new-refresh-token')
+      expect(localStorage.getItem('refresh_token')).toBeNull()
       expect(adapter.mock.calls[1][0].headers.get('Authorization')).toBe('Bearer new-token')
     })
 

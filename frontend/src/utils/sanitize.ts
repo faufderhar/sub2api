@@ -19,17 +19,21 @@ export function isHttpsAbsoluteUrl(value: string | null | undefined): boolean {
   }
 }
 
-/** 首页 iframe 默认 sandbox 权限（F-1）。同源 token 只作用于被嵌页面自身的源，不影响本站。 */
+/**
+ * 首页 iframe 默认 sandbox 权限（F-1 / R3-IFRAME）。
+ * 不含 allow-same-origin：跨源 iframe 导航/重定向回本站后也不能取得本站 origin 权限。
+ * 去掉该 token 后，被嵌文档是不透明唯一源，无法读父页面 DOM/cookie/storage，也无法自行去掉 sandbox。
+ * 依赖被嵌站点自身 cookie/storage 的第三方嵌入可能会受影响（见交付说明兼容清单）。
+ */
 export const HOME_IFRAME_SANDBOX_DEFAULT = [
   'allow-scripts',
-  'allow-same-origin',
   'allow-popups',
   'allow-forms'
 ] as const
 
 /**
- * A-1：iframe src 与本站同源时，默认与自定义 sandbox 都不能带 allow-same-origin。
- * 用 new URL(src, location.href) 解析；相对路径算同源。无法解析时按跨域处理（保留默认集合）。
+ * iframe src 是否与本站同源。用 new URL(src, location.href) 解析；相对路径算同源。
+ * 无法解析时返回 false。R3-IFRAME 后 sandbox 计算不再依赖此结果，保留供测试与诊断。
  */
 export function isHomeIframeSameOrigin(
   src: string | null | undefined,
@@ -47,19 +51,18 @@ export function isHomeIframeSameOrigin(
 
 /**
  * 计算 iframe 最终 sandbox：与默认 token 取交集，不放宽。
- * - 未写 sandbox → 用默认全集（同源时去掉 allow-same-origin，A-1）
- * - 写了 sandbox（含空字符串）→ 只保留默认集合内的 token；同源时仍去掉 allow-same-origin
+ * - 未写 sandbox → 用默认全集（从不含 allow-same-origin，R3-IFRAME）
+ * - 写了 sandbox（含空字符串）→ 只保留默认集合内的 token；allow-same-origin 一律丢掉
  * 空属性表示最严（无权限），交集仍为空。
  * 大小写 / 多余空白在 token 归一化时处理。
+ * `src` 保留以兼容调用方；不再根据初始 src 决定是否去掉 allow-same-origin
+ * （跨源导航回本站后读 location 也不可靠）。
  */
 export function resolveHomeIframeSandbox(
   existing: string | null | undefined,
-  src?: string | null
+  _src?: string | null
 ): string {
-  const sameOrigin = isHomeIframeSameOrigin(src)
-  const allowed: string[] = sameOrigin
-    ? HOME_IFRAME_SANDBOX_DEFAULT.filter((t) => t !== 'allow-same-origin')
-    : [...HOME_IFRAME_SANDBOX_DEFAULT]
+  const allowed = [...HOME_IFRAME_SANDBOX_DEFAULT]
   const allowedSet = new Set<string>(allowed)
 
   if (existing === null || existing === undefined) {
@@ -71,7 +74,7 @@ export function resolveHomeIframeSandbox(
     .split(/\s+/)
     .filter(Boolean)
     .filter((t) => allowedSet.has(t))
-  // 稳定顺序：按默认 token 顺序输出（同源时已不含 allow-same-origin）
+  // 稳定顺序：按默认 token 顺序输出（已不含 allow-same-origin）
   return allowed.filter((t) => tokens.includes(t)).join(' ')
 }
 
@@ -92,7 +95,7 @@ function getHomePurifier(): ReturnType<typeof DOMPurify> {
         node.remove()
         return
       }
-      // F-1 / A-1：统一加 sandbox；管理员自写的取交集，不放宽；同源去掉 allow-same-origin
+      // F-1 / A-1 / R3-IFRAME：统一加 sandbox；管理员自写的取交集，不放宽；永不写 allow-same-origin
       const hadSandbox = node.hasAttribute('sandbox')
       const src = node.getAttribute('src')
       node.setAttribute(
@@ -121,9 +124,9 @@ function getHomePurifier(): ReturnType<typeof DOMPurify> {
  *   rel="noopener noreferrer"（D-3，保留原有的其他 rel 值）。
  * - 保留 iframe 的 sandbox、allow、referrerpolicy、loading（D-2）：管理员用 sandbox 收紧权限、
  *   常见嵌入代码用 allow 开启自动播放/全屏等，剥掉反而会放宽限制或造成功能回归。
- * - F-1 / A-1：所有保留的 iframe 统一写入 sandbox；默认 allow-scripts allow-same-origin
+ * - F-1 / A-1 / R3-IFRAME：所有保留的 iframe 统一写入 sandbox；默认 allow-scripts
  *   allow-popups allow-forms；管理员自写的 sandbox 与默认取交集，不放宽。
- *   同源 iframe（含相对路径）默认与自定义都不能带 allow-same-origin。
+ *   默认与自定义都不能带 allow-same-origin（不依赖初始 src 是否同源）。
  */
 export function sanitizeHomeContent(html: string): string {
   if (!html) return ''

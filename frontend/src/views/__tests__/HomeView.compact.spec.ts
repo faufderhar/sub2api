@@ -202,14 +202,14 @@ describe('HomeView custom home_content (L-1)', () => {
   it('F-1：URL 模式 iframe 带默认 sandbox', () => {
     const wrapper = mountHome({ home_content: 'https://example.com/home' })
     expect(wrapper.get('iframe').attributes('sandbox')).toBe(
-      'allow-scripts allow-same-origin allow-popups allow-forms'
+      'allow-scripts allow-popups allow-forms'
     )
   })
 
   it('F-1：富文本未写 sandbox 的 iframe 也有默认 sandbox', () => {
     const wrapper = mountHome({ home_content: '<iframe src="https://example.com/embed"></iframe>' })
     expect(wrapper.get('iframe').attributes('sandbox')).toBe(
-      'allow-scripts allow-same-origin allow-popups allow-forms'
+      'allow-scripts allow-popups allow-forms'
     )
   })
 
