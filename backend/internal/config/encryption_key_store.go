@@ -126,6 +126,9 @@ func resolveTotpEncryptionKey(totp *TotpConfig, dataDir string) error {
 	totp.EncryptionKey = strings.TrimSpace(totp.EncryptionKey)
 	totp.EncryptionKeyFile = ""
 	if totp.EncryptionKey != "" {
+		if !validTotpEncryptionKeyHex(totp.EncryptionKey) {
+			return fmt.Errorf("invalid totp.encryption_key / TOTP_ENCRYPTION_KEY: must be 64 hex characters")
+		}
 		totp.EncryptionKeyConfigured = true
 		totp.EncryptionKeySource = TotpEncryptionKeySourceExplicit
 		if persisted, err := readPersistedTotpEncryptionKey(path); err == nil && persisted != "" && !strings.EqualFold(persisted, totp.EncryptionKey) {

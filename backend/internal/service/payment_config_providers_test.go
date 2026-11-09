@@ -584,7 +584,7 @@ func TestUpdateProviderInstanceRejectsProtectedConfigChangesWhilePendingOrders(t
 
 			saved, err := client.PaymentProviderInstance.Get(ctx, instance.ID)
 			require.NoError(t, err)
-			cfg, err := svc.decryptConfig(saved.Config)
+			cfg, err := svc.decryptConfig(saved.ID, saved.ProviderKey, saved.Config)
 			require.NoError(t, err)
 			require.Equal(t, tc.wantValue, cfg[tc.fieldName])
 		})
@@ -654,7 +654,7 @@ func TestUpdateProviderInstanceAllowsSafeConfigChangesWhilePendingOrders(t *test
 
 			saved, err := client.PaymentProviderInstance.Get(ctx, instance.ID)
 			require.NoError(t, err)
-			cfg, err := svc.decryptConfig(saved.Config)
+			cfg, err := svc.decryptConfig(saved.ID, saved.ProviderKey, saved.Config)
 			require.NoError(t, err)
 			require.Equal(t, tc.wantValue, cfg[tc.fieldName])
 		})
@@ -688,7 +688,7 @@ func TestUpdateProviderInstanceClearsAirwallexAccountID(t *testing.T) {
 
 	saved, err := client.PaymentProviderInstance.Get(ctx, instance.ID)
 	require.NoError(t, err)
-	cfg, err := svc.decryptConfig(saved.Config)
+	cfg, err := svc.decryptConfig(saved.ID, saved.ProviderKey, saved.Config)
 	require.NoError(t, err)
 	require.Empty(t, cfg["accountId"])
 	require.Equal(t, "client-id-test", cfg["clientId"])

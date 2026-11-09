@@ -28,6 +28,9 @@ func NewAESEncryptor(cfg *config.Config) (service.SecretEncryptor, error) {
 	if len(key) != 32 {
 		return nil, fmt.Errorf("totp encryption key must be 32 bytes (64 hex chars), got %d bytes", len(key))
 	}
+	if err := service.InitSecretFieldCrypto(key, cfg != nil && cfg.Totp.EncryptionKeyConfigured); err != nil {
+		return nil, err
+	}
 
 	return &AESEncryptor{key: key}, nil
 }

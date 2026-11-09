@@ -88,3 +88,15 @@ func TestIsSensitiveCredentialKey(t *testing.T) {
 	require.False(t, IsSensitiveCredentialKey(""))
 	require.False(t, IsSensitiveCredentialKey("model_mapping"))
 }
+
+func TestMergePreservingSensitiveCreds_EmptyStringKeepsExisting(t *testing.T) {
+	existing := map[string]any{"refresh_token": "rt-keep", "api_key": "sk-keep"}
+	incoming := map[string]any{"refresh_token": "", "base_url": "https://x"}
+	out := MergePreservingSensitiveCreds(existing, incoming)
+	if out["refresh_token"] != "rt-keep" {
+		t.Fatalf("expected empty refresh_token to keep existing, got %#v", out["refresh_token"])
+	}
+	if out["api_key"] != "sk-keep" {
+		t.Fatalf("expected missing api_key to keep existing, got %#v", out["api_key"])
+	}
+}

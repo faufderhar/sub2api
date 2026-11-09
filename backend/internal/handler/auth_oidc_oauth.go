@@ -711,11 +711,11 @@ func (h *AuthHandler) CompleteOIDCOAuthRegistration(c *gin.Context) {
 	clearOAuthPendingSessionCookie(c, secureCookie)
 	clearOAuthPendingBrowserCookie(c, secureCookie)
 
+	setRefreshCookie(c, h.cfg, tokenPair.RefreshToken)
 	c.JSON(http.StatusOK, gin.H{
-		"access_token":  tokenPair.AccessToken,
-		"refresh_token": tokenPair.RefreshToken,
-		"expires_in":    tokenPair.ExpiresIn,
-		"token_type":    "Bearer",
+		"access_token": tokenPair.AccessToken,
+		"expires_in":   tokenPair.ExpiresIn,
+		"token_type":   "Bearer",
 	})
 }
 
@@ -1271,7 +1271,7 @@ func (h *AuthHandler) tryOIDCVerifiedEmailFastPath(
 		AvatarURL:        pendingSessionStringValue(upstreamClaims, "suggested_avatar_url"),
 		UpstreamMetadata: upstreamMetadata,
 	}
-	tokenPair, _, err := h.authService.LoginOrRegisterVerifiedEmailOAuthWithSignupCodes(
+	tokenPair, oauthUser, err := h.authService.LoginOrRegisterVerifiedEmailOAuthWithSignupCodes(
 		ctx,
 		input,
 		"",
@@ -1283,14 +1283,13 @@ func (h *AuthHandler) tryOIDCVerifiedEmailFastPath(
 		return false
 	}
 
-	fragment := url.Values{}
-	fragment.Set("access_token", tokenPair.AccessToken)
-	fragment.Set("refresh_token", tokenPair.RefreshToken)
-	fragment.Set("expires_in", fmt.Sprintf("%d", tokenPair.ExpiresIn))
-	fragment.Set("token_type", "Bearer")
-	fragment.Set("redirect", redirectTo)
-	clearOAuthPendingSessionCookie(c, isRequestHTTPS(c))
-	clearOAuthPendingBrowserCookie(c, isRequestHTTPS(c))
-	redirectWithFragment(c, frontendCallback, fragment)
+	if tokenPair != nil && tokenPair.RefreshToken != "" {
+		_ = h.authService.RevokeRefreshToken(c.Request.Context(), tokenPair.RefreshToken)
+	}
+	h.redirectCompletedOAuthLogin(c, frontendCallback, redirectTo, input.Email, oauthUser, service.PendingAuthIdentityKey{
+		ProviderType:    strings.TrimSpace(input.ProviderType),
+		ProviderKey:     strings.TrimSpace(input.ProviderKey),
+		ProviderSubject: strings.TrimSpace(input.ProviderSubject),
+	}, upstreamClaims)
 	return true
 }

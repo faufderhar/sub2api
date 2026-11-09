@@ -94,7 +94,7 @@ func TestGetOrCreateFingerprintDoesNotTouchCacheAboveFloor(t *testing.T) {
 	require.Zero(t, cache.setCalls)
 }
 
-// 客户端送来高于下限的更新版本：常规升级照常生效，且不被下限压回。
+// R3-FP D3/D6：客户端更高版本不得抬升账号身份；只跟随内置下限。
 func TestGetOrCreateFingerprintClientNewerThanFloorStillWins(t *testing.T) {
 	newUA := "claude-cli/2.9.0 (external, cli)"
 	cache := &stubIdentityCache{fingerprint: &Fingerprint{
@@ -107,8 +107,9 @@ func TestGetOrCreateFingerprintClientNewerThanFloorStillWins(t *testing.T) {
 	fp, err := svc.GetOrCreateFingerprint(context.Background(), 1, headersWithUA(newUA))
 
 	require.NoError(t, err)
-	require.Equal(t, newUA, fp.UserAgent, "客户端更新版本优先于下限，不得被压回")
-	require.Equal(t, 1, cache.setCalls)
+	require.Equal(t, "claude-cli/"+claude.CLICurrentVersion+" (external, cli)", fp.UserAgent,
+		"downstream newer UA must not replace the locked identity")
+	require.Equal(t, "cid-1", fp.ClientID)
 }
 
 // 客户端版本高于缓存但低于下限：merge 升级后仍被抬到下限（二者取更新者）。
@@ -141,6 +142,7 @@ func TestCreateFingerprintFromHeadersFloorsOldClientUserAgent(t *testing.T) {
 	)
 
 	require.NoError(t, err)
-	require.Equal(t, "claude-cli/"+claude.CLICurrentVersion+" (external, claude-desktop-3p)", fp.UserAgent)
+	require.Equal(t, builtUserAgent(), fp.UserAgent,
+		"R3-FP: create no longer copies the downstream UA suffix")
 	require.Equal(t, 1, cache.setCalls)
 }

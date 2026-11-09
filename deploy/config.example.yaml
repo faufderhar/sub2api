@@ -287,9 +287,13 @@ security:
     # Connections through a configured proxy are not dial-checked (the proxy may be private).
     # M-3（第二轮）：allow_private_hosts 为 false 时，直连还会在建连时校验解析后的 IP
     # （防 DNS rebinding / 重定向到内网）。拦截范围见上方英文；经代理的连接不在建连时校验。
-    # Allow localhost/private IPs for upstream/pricing/CRS (use only in trusted networks)
-    # 允许本地/私有 IP 地址用于上游/定价/CRS（仅在可信网络中使用）
-    allow_private_hosts: true
+    # Allow localhost/private IPs for upstream/pricing/CRS (use only in trusted networks).
+    # New installs default to false. Upgrades keep the value already in this file or the env var;
+    # a file that predates the key (and has no env override) keeps the historical implicit true.
+    # 允许本地/私有 IP 地址用于上游/定价/CRS（仅在可信网络中使用）。
+    # 新安装默认 false。升级不改写已有配置：文件或环境变量里的原值保留；
+    # 旧文件没有该项且未设环境变量时，保持历史上的隐含默认 true。
+    allow_private_hosts: false
     # Allow http:// URLs when allowlist is disabled (default: true; set to false to require https)
     # 白名单禁用时是否允许 http:// URL（默认: true，设为 false 则仅允许 https）
     allow_insecure_http: true

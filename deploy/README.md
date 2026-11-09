@@ -301,7 +301,7 @@ encrypted settings survive restarts.
 | `gateway.request_body_read_timeout` | `GATEWAY_REQUEST_BODY_READ_TIMEOUT` | `0` (off) | T-4: gateway body read timeout in seconds, body-only; see EDGE_SECURITY.md for edge timeouts |
 | `security.honor_forwarded_client_ip_headers_from_trusted_proxies` | `SECURITY_HONOR_FORWARDED_CLIENT_IP_HEADERS_FROM_TRUSTED_PROXIES` | `false` | T-5: honor single-value client-IP headers only from trusted proxies |
 | `concurrency.redis_failure_policy` | `CONCURRENCY_REDIS_FAILURE_POLICY` | `fail_open` | L-7: `fail_close` rejects (429/503) when Redis is down |
-| `security.url_allowlist.allow_private_hosts` | `SECURITY_URL_ALLOWLIST_ALLOW_PRIVATE_HOSTS` | `true` (unchanged) | M-3: when `false`, the dialed IP is also checked (reserved ranges included) |
+| `security.url_allowlist.allow_private_hosts` | `SECURITY_URL_ALLOWLIST_ALLOW_PRIVATE_HOSTS` | `false` (new installs); upgrades keep the file/env value, or historical `true` if an old file omitted the key | M-3: when `false`, the dialed IP is also checked (reserved ranges included). Private/intranet upstreams must set this to `true` explicitly. |
 | — | `SUB2API_DEBUG_GATEWAY_BODY_MAX_MB` / `_MAX_AGE_HOURS` | `64` / `24` | L-6: debug body dump caps; files 0600 |
 
 Background panics in SSE readers and scheduled jobs are now recovered and

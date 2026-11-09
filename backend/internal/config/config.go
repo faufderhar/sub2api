@@ -577,6 +577,26 @@ func hasExplicitConfigOrEnv(configKey, envKey string) bool {
 	return ok
 }
 
+const allowPrivateHostsConfigKey = "security.url_allowlist.allow_private_hosts"
+const allowPrivateHostsEnvKey = "SECURITY_URL_ALLOWLIST_ALLOW_PRIVATE_HOSTS"
+
+// applyAllowPrivateHostsUpgradeCompatibility keeps the historical implicit default
+// (true) when an existing config file is loaded without the key and the env var
+// is unset. New installs (no config file) keep the registered default of false.
+func applyAllowPrivateHostsUpgradeCompatibility(cfg *Config) {
+	if cfg == nil {
+		return
+	}
+	if hasExplicitConfigOrEnv(allowPrivateHostsConfigKey, allowPrivateHostsEnvKey) {
+		return
+	}
+	if strings.TrimSpace(viper.ConfigFileUsed()) == "" {
+		cfg.Security.URLAllowlist.AllowPrivateHosts = false
+		return
+	}
+	cfg.Security.URLAllowlist.AllowPrivateHosts = true
+}
+
 func applyLegacyWeChatConnectEnvCompatibility(cfg *WeChatConnectConfig) {
 	if cfg == nil {
 		return
@@ -1987,6 +2007,8 @@ func load(allowMissingJWTSecret bool) (*Config, error) {
 		cfg.Gateway.OpenAIScheduler.StickyEscapeEnabled = true
 	}
 
+	applyAllowPrivateHostsUpgradeCompatibility(&cfg)
+
 	cfg.RunMode = NormalizeRunMode(cfg.RunMode)
 	cfg.Server.Mode = strings.ToLower(strings.TrimSpace(cfg.Server.Mode))
 	if cfg.Server.Mode == "" {
@@ -2212,7 +2234,7 @@ func setDefaults() {
 		"raw.githubusercontent.com",
 	})
 	viper.SetDefault("security.url_allowlist.crs_hosts", []string{})
-	viper.SetDefault("security.url_allowlist.allow_private_hosts", true)
+	viper.SetDefault("security.url_allowlist.allow_private_hosts", false) // R3: new installs default false; existing files keep their value
 	viper.SetDefault("security.url_allowlist.allow_insecure_http", true)
 	viper.SetDefault("security.response_headers.enabled", true)
 	viper.SetDefault("security.response_headers.additional_allowed", []string{})

@@ -36,6 +36,7 @@ var (
 	ErrRefreshTokenInvalid          = infraerrors.Unauthorized("REFRESH_TOKEN_INVALID", "invalid refresh token")
 	ErrRefreshTokenExpired          = infraerrors.Unauthorized("REFRESH_TOKEN_EXPIRED", "refresh token has expired")
 	ErrRefreshTokenReused           = infraerrors.Unauthorized("REFRESH_TOKEN_REUSED", "refresh token has been reused")
+	ErrRefreshTokenMissing          = infraerrors.Unauthorized("REFRESH_TOKEN_MISSING", "refresh token cookie is missing")
 	ErrEmailVerifyRequired          = infraerrors.BadRequest("EMAIL_VERIFY_REQUIRED", "email verification is required")
 	ErrEmailSuffixNotAllowed        = infraerrors.BadRequest("EMAIL_SUFFIX_NOT_ALLOWED", "email suffix is not allowed")
 	ErrEmailDomainRegistrationLimit = infraerrors.BadRequest(
@@ -1482,6 +1483,13 @@ func (s *AuthService) GetAccessTokenExpiresIn() int {
 	return s.cfg.JWT.ExpireHour * 3600
 }
 
+func (s *AuthService) Config() *config.Config {
+	if s == nil {
+		return nil
+	}
+	return s.cfg
+}
+
 // HashPassword 使用bcrypt加密密码
 func (s *AuthService) HashPassword(password string) (string, error) {
 	hashedBytes, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
@@ -1605,11 +1613,11 @@ func (s *AuthService) RequestPasswordReset(ctx context.Context, email, frontendB
 	}
 
 	if err := s.emailService.SendPasswordResetEmail(ctx, email, siteName, resetURL, firstEmailLocale(locale)); err != nil {
-		logger.LegacyPrintf("service.auth", "[Auth] Failed to send password reset email to %s: %v", email, err)
+		logger.LegacyPrintf("service.auth", "[Auth] Failed to send password reset email to %s: %v", notificationEmailHash(email), err)
 		return nil // Silent success to prevent enumeration
 	}
 
-	logger.LegacyPrintf("service.auth", "[Auth] Password reset email sent to: %s", email)
+	logger.LegacyPrintf("service.auth", "[Auth] Password reset email sent to: %s", notificationEmailHash(email))
 	return nil
 }
 
@@ -1629,11 +1637,11 @@ func (s *AuthService) RequestPasswordResetAsync(ctx context.Context, email, fron
 	}
 
 	if err := s.emailQueueService.EnqueuePasswordReset(email, siteName, resetURL, firstEmailLocale(locale)); err != nil {
-		logger.LegacyPrintf("service.auth", "[Auth] Failed to enqueue password reset email for %s: %v", email, err)
+		logger.LegacyPrintf("service.auth", "[Auth] Failed to enqueue password reset email for %s: %v", notificationEmailHash(email), err)
 		return nil // Silent success to prevent enumeration
 	}
 
-	logger.LegacyPrintf("service.auth", "[Auth] Password reset email enqueued for: %s", email)
+	logger.LegacyPrintf("service.auth", "[Auth] Password reset email enqueued for: %s", notificationEmailHash(email))
 	return nil
 }
 
@@ -1773,12 +1781,13 @@ func (s *AuthService) generateRefreshToken(ctx context.Context, user *User, fami
 	ttl := time.Duration(s.cfg.JWT.RefreshTokenExpireDays) * 24 * time.Hour
 
 	data := &RefreshTokenData{
-		UserID:       user.ID,
-		TokenVersion: resolvedTokenVersion(user),
-		FamilyID:     familyID,
-		BindingHash:  sessionBindingHashFromContext(ctx),
-		CreatedAt:    now,
-		ExpiresAt:    now.Add(ttl),
+		UserID:          user.ID,
+		TokenVersion:    resolvedTokenVersion(user),
+		FamilyID:        familyID,
+		BindingHash:     sessionBindingHashFromContext(ctx),
+		CreatedAt:       now,
+		ExpiresAt:       now.Add(ttl),
+		IssuedViaCookie: true,
 	}
 
 	// 存储Token数据
@@ -1802,7 +1811,9 @@ func (s *AuthService) generateRefreshToken(ctx context.Context, user *User, fami
 }
 
 // RefreshTokenPair 使用Refresh Token刷新Token对
-// 实现Token轮转：每次刷新都会生成新的Refresh Token，旧Token立即失效
+// 实现Token轮转：每次刷新都会生成新的Refresh Token，旧Token立即失效。
+// 同一旧 cookie 在 10 秒宽限内并发刷新时，只有一个请求原子消费旧 token 并签发新对；
+// 其余请求共享同一组 access + refresh（同一颗 Set-Cookie）。
 func (s *AuthService) RefreshTokenPair(ctx context.Context, refreshToken string) (*TokenPairWithUser, error) {
 	// 检查 refreshTokenCache 是否可用
 	if s.refreshTokenCache == nil {
@@ -1816,22 +1827,29 @@ func (s *AuthService) RefreshTokenPair(ctx context.Context, refreshToken string)
 
 	tokenHash := hashToken(refreshToken)
 
-	// 获取Token数据
-	data, err := s.refreshTokenCache.GetRefreshToken(ctx, tokenHash)
+	// Atomically claim the live token so concurrent tabs cannot each mint a new pair.
+	data, err := s.refreshTokenCache.ConsumeRefreshToken(ctx, tokenHash)
 	if err != nil {
 		if errors.Is(err, ErrRefreshTokenNotFound) {
-			// Token不存在，可能是已被使用（Token轮转）或已过期
-			logger.LegacyPrintf("service.auth", "[Auth] Refresh token not found, possible reuse attack")
+			if pair, ok := s.waitForRefreshRotationGrace(ctx, tokenHash); ok {
+				return pair, nil
+			}
+			if familyID, ok := s.lookupRefreshReplacement(ctx, tokenHash); ok {
+				_ = s.refreshTokenCache.DeleteTokenFamily(ctx, familyID)
+				return nil, ErrRefreshTokenReused
+			}
+			logger.LegacyPrintf("service.auth", "[Auth] Refresh token not found")
 			return nil, ErrRefreshTokenInvalid
 		}
 		logger.LegacyPrintf("service.auth", "[Auth] Error getting refresh token: %v", err)
 		return nil, ErrServiceUnavailable
 	}
+	if !data.IssuedViaCookie {
+		return nil, ErrRefreshTokenInvalid
+	}
 
-	// 检查Token是否过期
+	// 检查Token是否过期（Consume already removed the key）
 	if time.Now().After(data.ExpiresAt) {
-		// 删除过期Token
-		_ = s.refreshTokenCache.DeleteRefreshToken(ctx, tokenHash)
 		return nil, ErrRefreshTokenExpired
 	}
 
@@ -1844,6 +1862,7 @@ func (s *AuthService) RefreshTokenPair(ctx context.Context, refreshToken string)
 			return nil, ErrRefreshTokenInvalid
 		}
 		logger.LegacyPrintf("service.auth", "[Auth] Database error getting user for token refresh: %v", err)
+		s.restoreConsumedRefreshToken(ctx, tokenHash, data)
 		return nil, ErrServiceUnavailable
 	}
 
@@ -1871,21 +1890,166 @@ func (s *AuthService) RefreshTokenPair(ctx context.Context, refreshToken string)
 		}
 	}
 
-	// Token轮转：立即使旧Token失效
-	if err := s.refreshTokenCache.DeleteRefreshToken(ctx, tokenHash); err != nil {
-		logger.LegacyPrintf("service.auth", "[Auth] Failed to delete old refresh token: %v", err)
-		// 继续处理，不影响主流程
-	}
-
 	// 生成新的Token对，保持同一个家族ID
 	pair, err := s.GenerateTokenPair(ctx, user, data.FamilyID)
 	if err != nil {
+		s.restoreConsumedRefreshToken(ctx, tokenHash, data)
 		return nil, err
 	}
+	s.recordRefreshRotation(ctx, tokenHash, data, user.Role, pair)
 	return &TokenPairWithUser{
 		TokenPair: *pair,
 		UserRole:  user.Role,
 	}, nil
+}
+
+const (
+	refreshRotationGracePeriod = 10 * time.Second
+	refreshGraceLookupWait     = 500 * time.Millisecond
+	refreshGraceLookupInterval = 5 * time.Millisecond
+	refreshGraceKeyPrefix      = "grace:"
+	refreshReplacedKeyPrefix   = "replaced:"
+)
+
+func refreshGraceKey(tokenHash string) string    { return refreshGraceKeyPrefix + tokenHash }
+func refreshReplacedKey(tokenHash string) string { return refreshReplacedKeyPrefix + tokenHash }
+
+func refreshGraceSuccessorAAD(oldHash string) string {
+	return "refresh:grace:" + oldHash + ":successor_refresh"
+}
+
+func (s *AuthService) restoreConsumedRefreshToken(ctx context.Context, tokenHash string, data *RefreshTokenData) {
+	if s.refreshTokenCache == nil || data == nil {
+		return
+	}
+	ttl := time.Until(data.ExpiresAt)
+	if ttl < time.Second {
+		ttl = time.Second
+	}
+	if err := s.refreshTokenCache.StoreRefreshToken(ctx, tokenHash, data, ttl); err != nil {
+		logger.LegacyPrintf("service.auth", "[Auth] Failed to restore consumed refresh token: %v", err)
+	}
+}
+
+func (s *AuthService) waitForRefreshRotationGrace(ctx context.Context, tokenHash string) (*TokenPairWithUser, bool) {
+	if pair, ok := s.lookupRefreshRotationGrace(ctx, tokenHash); ok {
+		return pair, true
+	}
+	deadline := time.Now().Add(refreshGraceLookupWait)
+	ticker := time.NewTicker(refreshGraceLookupInterval)
+	defer ticker.Stop()
+	for time.Now().Before(deadline) {
+		select {
+		case <-ctx.Done():
+			return nil, false
+		case <-ticker.C:
+			if pair, ok := s.lookupRefreshRotationGrace(ctx, tokenHash); ok {
+				return pair, true
+			}
+		}
+	}
+	return s.lookupRefreshRotationGrace(ctx, tokenHash)
+}
+
+func sealRefreshGraceSuccessor(oldHash, plaintext string) (string, error) {
+	crypto := CurrentSecretFieldCrypto()
+	if crypto == nil || !crypto.Enabled() {
+		return "", errors.New("secret field crypto is not initialized")
+	}
+	return crypto.SealString(plaintext, refreshGraceSuccessorAAD(oldHash))
+}
+
+func openRefreshGraceSuccessor(oldHash, value string) (string, error) {
+	crypto := CurrentSecretFieldCrypto()
+	if crypto == nil || !crypto.Enabled() {
+		return "", errors.New("secret field crypto is not initialized")
+	}
+	return crypto.OpenString(value, refreshGraceSuccessorAAD(oldHash))
+}
+
+func successorRefreshFromGrace(oldHash string, data *RefreshTokenData) (string, bool) {
+	if data == nil {
+		return "", false
+	}
+	if data.SuccessorRefreshTokenEnc != "" {
+		plain, err := openRefreshGraceSuccessor(oldHash, data.SuccessorRefreshTokenEnc)
+		if err != nil {
+			logger.LegacyPrintf("service.auth", "[Auth] Failed to decrypt refresh rotation grace: %v", err)
+			return "", false
+		}
+		return plain, plain != ""
+	}
+	// Rolling-upgrade compat: grace records written before encryption landed
+	// may still carry plaintext for up to refreshRotationGracePeriod.
+	if data.SuccessorRefreshToken != "" {
+		return data.SuccessorRefreshToken, true
+	}
+	return "", false
+}
+
+func (s *AuthService) recordRefreshRotation(ctx context.Context, oldHash string, old *RefreshTokenData, role string, pair *TokenPair) {
+	if s.refreshTokenCache == nil || old == nil || pair == nil {
+		return
+	}
+	enc, err := sealRefreshGraceSuccessor(oldHash, pair.RefreshToken)
+	if err != nil {
+		logger.LegacyPrintf("service.auth", "[Auth] Failed to encrypt refresh rotation grace successor: %v", err)
+		return
+	}
+	now := time.Now()
+	grace := &RefreshTokenData{
+		UserID:                   old.UserID,
+		FamilyID:                 old.FamilyID,
+		ReplacedAt:               now,
+		SuccessorAccessToken:     pair.AccessToken,
+		SuccessorRefreshTokenEnc: enc,
+		SuccessorExpiresIn:       pair.ExpiresIn,
+		SuccessorUserRole:        role,
+	}
+	stored, err := s.refreshTokenCache.StoreRefreshTokenIfAbsent(ctx, refreshGraceKey(oldHash), grace, refreshRotationGracePeriod)
+	if err != nil {
+		logger.LegacyPrintf("service.auth", "[Auth] Failed to store refresh rotation grace: %v", err)
+	} else if !stored {
+		logger.LegacyPrintf("service.auth", "[Auth] Refresh rotation grace already present; keeping first successor")
+	}
+	replacedTTL := time.Until(old.ExpiresAt)
+	if replacedTTL < refreshRotationGracePeriod {
+		replacedTTL = refreshRotationGracePeriod
+	}
+	replaced := &RefreshTokenData{UserID: old.UserID, FamilyID: old.FamilyID, ReplacedAt: now}
+	if err := s.refreshTokenCache.StoreRefreshToken(ctx, refreshReplacedKey(oldHash), replaced, replacedTTL); err != nil {
+		logger.LegacyPrintf("service.auth", "[Auth] Failed to store refresh replacement marker: %v", err)
+	}
+}
+
+func (s *AuthService) lookupRefreshRotationGrace(ctx context.Context, tokenHash string) (*TokenPairWithUser, bool) {
+	data, err := s.refreshTokenCache.GetRefreshToken(ctx, refreshGraceKey(tokenHash))
+	if err != nil || data == nil {
+		return nil, false
+	}
+	refresh, ok := successorRefreshFromGrace(tokenHash, data)
+	if !ok || data.SuccessorAccessToken == "" {
+		return nil, false
+	}
+	if !data.ReplacedAt.IsZero() && time.Since(data.ReplacedAt) > refreshRotationGracePeriod {
+		return nil, false
+	}
+	return &TokenPairWithUser{
+		TokenPair: TokenPair{
+			AccessToken:  data.SuccessorAccessToken,
+			RefreshToken: refresh,
+			ExpiresIn:    data.SuccessorExpiresIn,
+		},
+		UserRole: data.SuccessorUserRole,
+	}, true
+}
+
+func (s *AuthService) lookupRefreshReplacement(ctx context.Context, tokenHash string) (string, bool) {
+	data, err := s.refreshTokenCache.GetRefreshToken(ctx, refreshReplacedKey(tokenHash))
+	if err != nil || data == nil || data.FamilyID == "" {
+		return "", false
+	}
+	return data.FamilyID, true
 }
 
 // RevokeRefreshToken 撤销单个Refresh Token

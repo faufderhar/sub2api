@@ -210,13 +210,14 @@ func (h *AuthHandler) emailOAuthCallbackWithProfile(
 		return
 	}
 
-	fragment := url.Values{}
-	fragment.Set("access_token", tokenPair.AccessToken)
-	fragment.Set("refresh_token", tokenPair.RefreshToken)
-	fragment.Set("expires_in", fmt.Sprintf("%d", tokenPair.ExpiresIn))
-	fragment.Set("token_type", "Bearer")
-	fragment.Set("redirect", redirectTo)
-	redirectWithFragment(c, frontendCallback, fragment)
+	if tokenPair != nil && tokenPair.RefreshToken != "" {
+		_ = h.authService.RevokeRefreshToken(c.Request.Context(), tokenPair.RefreshToken)
+	}
+	h.redirectCompletedOAuthLogin(c, frontendCallback, redirectTo, profile.Email, user, service.PendingAuthIdentityKey{
+		ProviderType:    strings.TrimSpace(input.ProviderType),
+		ProviderKey:     strings.TrimSpace(input.ProviderKey),
+		ProviderSubject: strings.TrimSpace(input.ProviderSubject),
+	}, nil)
 }
 
 func (h *AuthHandler) emailOAuthShouldCreatePendingRegistration(ctx context.Context, input service.EmailOAuthIdentityInput) (bool, error) {

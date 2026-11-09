@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/fieldcrypto"
 	"sync/atomic"
 	"time"
 
@@ -146,7 +148,7 @@ func (lb *DefaultLoadBalancer) queryEnabledInstances(
 			}
 		} else if InstanceSupportsType(inst.SupportedTypes, paymentType) {
 			if expectedWxpayJSAPIAppID != "" && normalizeVisibleMethodSupportType(paymentType) == TypeWxpay && inst.ProviderKey == TypeWxpay {
-				config, cfgErr := lb.decryptConfig(inst.Config)
+				config, cfgErr := lb.decryptConfigFor(inst.ID, inst.Config)
 				if cfgErr != nil {
 					slog.Warn("skip wxpay instance with unreadable config during jsapi filtering", "instance_id", inst.ID, "error", cfgErr)
 					continue
@@ -293,7 +295,7 @@ func pickLeastAmount(candidates []instanceCandidate) instanceCandidate {
 }
 
 func (lb *DefaultLoadBalancer) buildSelection(selected *dbent.PaymentProviderInstance) (*InstanceSelection, error) {
-	config, err := lb.decryptConfig(selected.Config)
+	config, err := lb.decryptConfigFor(selected.ID, selected.Config)
 	if err != nil {
 		return nil, fmt.Errorf("decrypt instance %d config: %w", selected.ID, err)
 	}
@@ -324,13 +326,13 @@ func (lb *DefaultLoadBalancer) buildSelection(selected *dbent.PaymentProviderIns
 // transitional compatibility shim for pre-plaintext records. Remove it (and
 // the encryptionKey field + the Decrypt import) after a few releases once all
 // live deployments have re-saved their provider configs through the UI.
-func (lb *DefaultLoadBalancer) decryptConfig(stored string) (map[string]string, error) {
+func (lb *DefaultLoadBalancer) decryptConfigFor(instanceID int64, stored string) (map[string]string, error) {
 	if stored == "" {
 		return nil, nil
 	}
 	var config map[string]string
 	if err := json.Unmarshal([]byte(stored), &config); err == nil {
-		return config, nil
+		return lb.openFieldEnvelopes(instanceID, config)
 	}
 	// Deprecated: legacy AES-256-GCM ciphertext fallback — scheduled for removal.
 	if len(lb.encryptionKey) == AES256KeySize {
@@ -344,6 +346,30 @@ func (lb *DefaultLoadBalancer) decryptConfig(stored string) (map[string]string, 
 	slog.Warn("payment provider config unreadable, treating as empty for re-entry",
 		"stored_len", len(stored))
 	return nil, nil
+}
+
+func (lb *DefaultLoadBalancer) openFieldEnvelopes(instanceID int64, config map[string]string) (map[string]string, error) {
+	if config == nil {
+		return nil, nil
+	}
+	key := lb.encryptionKey
+	if len(key) != fieldcrypto.AES256KeySize {
+		return config, nil
+	}
+	for k, v := range config {
+		if !fieldcrypto.IsEnvelope(v) {
+			continue
+		}
+		plain, err := fieldcrypto.Decrypt(key, v, fmt.Sprintf("payment:%d:config:%s", instanceID, k))
+		if err != nil {
+			plain, err = fieldcrypto.Decrypt(key, v, fmt.Sprintf("payment:0:config:%s", k))
+		}
+		if err != nil {
+			return nil, fmt.Errorf("decrypt instance %d field %s: %w", instanceID, k, err)
+		}
+		config[k] = plain
+	}
+	return config, nil
 }
 
 // GetInstanceDailyAmount returns the total completed order amount for an instance today.
@@ -425,5 +451,5 @@ func (lb *DefaultLoadBalancer) GetInstanceConfig(ctx context.Context, instanceID
 	if err != nil {
 		return nil, fmt.Errorf("get instance %d: %w", instanceID, err)
 	}
-	return lb.decryptConfig(inst.Config)
+	return lb.decryptConfigFor(inst.ID, inst.Config)
 }

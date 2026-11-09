@@ -295,7 +295,7 @@ func (h *UserHandler) Create(c *gin.Context) {
 
 	// 创建管理员账号属权限敏感操作：需最近完成 step-up 2FA 验证。
 	if req.Role == service.RoleAdmin {
-		if !middleware.EnforceStepUp(c, h.totpService, h.userService, h.settingService) {
+		if !middleware.EnforceStepUpAlways(c, h.totpService, h.userService) {
 			return
 		}
 	}
@@ -352,7 +352,7 @@ func (h *UserHandler) Update(c *gin.Context) {
 			return
 		}
 		if target.Role != service.RoleAdmin {
-			if !middleware.EnforceStepUp(c, h.totpService, h.userService, h.settingService) {
+			if !middleware.EnforceStepUpAlways(c, h.totpService, h.userService) {
 				return
 			}
 		}

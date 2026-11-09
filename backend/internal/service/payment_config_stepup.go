@@ -171,7 +171,7 @@ func (s *PaymentConfigService) ProviderInstanceUpdateChanges(ctx context.Context
 		return true, nil
 	}
 	if req.Config != nil {
-		existing, err := s.decryptConfig(current.Config)
+		existing, err := s.decryptConfig(current.ID, current.ProviderKey, current.Config)
 		if err != nil {
 			return true, fmt.Errorf("decrypt existing config: %w", err)
 		}

@@ -301,6 +301,7 @@ type AccountUsageService struct {
 	openAIQuotaService      *OpenAIQuotaService
 	cache                   *UsageCache
 	identityCache           IdentityCache
+	identityService         *IdentityService
 	tlsFPProfileService     *TLSFingerprintProfileService
 	agentIdentityTaskMu     sync.Mutex
 	agentIdentityWS         agentIdentityWSConnectionInvalidator
@@ -1641,8 +1642,11 @@ func (s *AccountUsageService) fetchOAuthUsageRaw(ctx context.Context, account *A
 		TLSProfile:  s.tlsFPProfileService.ResolveTLSProfile(account),
 	}
 
-	// 尝试获取缓存的 Fingerprint（包含 User-Agent 等信息）
-	if s.identityCache != nil {
+	if s.identityService != nil {
+		if fp, err := s.identityService.GetOrCreateForAccount(ctx, account, nil); err == nil && fp != nil {
+			opts.Fingerprint = fp
+		}
+	} else if s.identityCache != nil {
 		if fp, err := s.identityCache.GetFingerprint(ctx, account.ID); err == nil && fp != nil {
 			opts.Fingerprint = fp
 		}

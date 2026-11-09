@@ -634,3 +634,17 @@ func TestPrepareAdminCredentialsAcceptsMinimumLengthPassword(t *testing.T) {
 		t.Fatalf("password = %q, want unchanged", admin.Password)
 	}
 }
+
+func TestWriteConfigFileSetsAllowPrivateHostsFalse(t *testing.T) {
+	t.Setenv("DATA_DIR", t.TempDir())
+	if err := writeConfigFile(&SetupConfig{}); err != nil {
+		t.Fatalf("writeConfigFile() error = %v", err)
+	}
+	data, err := os.ReadFile(GetConfigFilePath())
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if !strings.Contains(string(data), "allow_private_hosts: false") {
+		t.Fatalf("new install config should set allow_private_hosts: false, got:\n%s", string(data))
+	}
+}

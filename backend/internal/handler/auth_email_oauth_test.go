@@ -114,12 +114,14 @@ func TestEmailOAuthCallbackExistingEmailLogsInWhenInvitationEnabled(t *testing.T
 
 	require.Equal(t, http.StatusFound, recorder.Code)
 	location := recorder.Header().Get("Location")
-	require.Contains(t, location, "access_token=")
-	require.Contains(t, location, "redirect=%252Fdashboard")
+	require.Contains(t, location, "completion_code=")
+	require.NotContains(t, location, "access_token=")
+	require.NotContains(t, location, "refresh_token=")
+	require.Contains(t, location, "redirect=")
 
 	sessionCount, err := client.PendingAuthSession.Query().Count(ctx)
 	require.NoError(t, err)
-	require.Zero(t, sessionCount)
+	require.Equal(t, 1, sessionCount)
 
 	identityCount, err := client.AuthIdentity.Query().Where(
 		authidentity.ProviderTypeEQ("google"),

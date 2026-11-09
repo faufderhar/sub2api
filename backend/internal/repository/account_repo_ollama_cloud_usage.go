@@ -287,7 +287,7 @@ func lockOllamaCloudUsageGroup(
 	account *service.Account,
 	apiKey string,
 ) ([]lockedOllamaCloudUsageMember, error) {
-	credentials, err := json.Marshal(normalizeJSONMap(account.Credentials))
+	credentials, err := accountCredentialsIdentityJSON(account)
 	if err != nil {
 		return nil, err
 	}

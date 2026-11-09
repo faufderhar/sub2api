@@ -143,12 +143,17 @@ func createAccountRecord(ctx context.Context, client *dbent.Client, account *ser
 		return service.ErrAccountNilInput
 	}
 
+	preparedCreds, err := prepareCredentialsForStore(0, account.Credentials, account.StoredCredentialsJSON)
+	if err != nil {
+		return err
+	}
+
 	builder := client.Account.Create().
 		SetName(account.Name).
 		SetNillableNotes(account.Notes).
 		SetPlatform(account.Platform).
 		SetType(account.Type).
-		SetCredentials(normalizeJSONMap(account.Credentials)).
+		SetCredentials(normalizeJSONMap(preparedCreds)).
 		SetExtra(normalizeJSONMap(account.Extra)).
 		SetConcurrency(account.Concurrency).
 		SetPriority(account.Priority).
@@ -205,6 +210,24 @@ func createAccountRecord(ctx context.Context, client *dbent.Client, account *ser
 	account.ID = created.ID
 	account.CreatedAt = created.CreatedAt
 	account.UpdatedAt = created.UpdatedAt
+	if crypto := service.CurrentSecretFieldCrypto(); crypto != nil && crypto.Enabled() {
+		rewritten, err := prepareCredentialsForStore(created.ID, account.Credentials, "")
+		if err != nil {
+			return err
+		}
+		if raw, marshalErr := json.Marshal(normalizeJSONMap(rewritten)); marshalErr == nil {
+			account.StoredCredentialsJSON = string(raw)
+		}
+		if _, updErr := client.Account.UpdateOneID(created.ID).SetCredentials(normalizeJSONMap(rewritten)).Save(ctx); updErr != nil {
+			return translatePersistenceError(updErr, service.ErrAccountNotFound, nil)
+		}
+	}
+	if err := ensureCreatedClaudeFingerprint(ctx, client, account); err != nil {
+		if _, delErr := client.Account.Delete().Where(dbaccount.IDEQ(created.ID)).Exec(ctx); delErr != nil {
+			logger.LegacyPrintf("repository.account", "rollback fingerprint-less account %d failed: %v", created.ID, delErr)
+		}
+		return err
+	}
 	return nil
 }
 
@@ -543,12 +566,20 @@ func (r *accountRepository) updateLockedAccount(
 		schedulable = false
 	}
 
+	preparedCreds, prepErr := prepareCredentialsForStore(account.ID, account.Credentials, account.StoredCredentialsJSON)
+	if prepErr != nil {
+		return nil, prepErr
+	}
+	if raw, marshalErr := json.Marshal(normalizeJSONMap(preparedCreds)); marshalErr == nil {
+		account.StoredCredentialsJSON = string(raw)
+	}
+
 	builder := client.Account.UpdateOneID(account.ID).
 		SetName(account.Name).
 		SetNillableNotes(account.Notes).
 		SetPlatform(account.Platform).
 		SetType(account.Type).
-		SetCredentials(normalizeJSONMap(account.Credentials)).
+		SetCredentials(normalizeJSONMap(preparedCreds)).
 		SetExtra(extra).
 		SetConcurrency(account.Concurrency).
 		SetPriority(account.Priority).
@@ -628,7 +659,7 @@ func lockAndMergeAccountProbeExtra(
 	explicitProbeEnabled *bool,
 	explicitRateSyncEnabled *bool,
 ) (map[string]any, error) {
-	credentials, err := json.Marshal(normalizeJSONMap(account.Credentials))
+	credentials, err := accountCredentialsIdentityJSON(account)
 	if err != nil {
 		return nil, err
 	}
@@ -872,7 +903,11 @@ func decodeAccountExtraJSON(raw []byte) (any, bool, error) {
 }
 
 func (r *accountRepository) UpdateCredentials(ctx context.Context, id int64, credentials map[string]any) error {
-	payload, err := json.Marshal(normalizeJSONMap(credentials))
+	prepared, prepErr := prepareCredentialsForStore(id, credentials, "")
+	if prepErr != nil {
+		return prepErr
+	}
+	payload, err := json.Marshal(normalizeJSONMap(prepared))
 	if err != nil {
 		return err
 	}
@@ -1572,7 +1607,7 @@ func (r *accountRepository) SetGrokOAuthErrorIfCredentialsUnchanged(
 	if r == nil || r.sql == nil {
 		return false, errors.New("account repository SQL executor is not configured")
 	}
-	expectedJSON, err := json.Marshal(normalizeJSONMap(expectedCredentials))
+	expectedJSON, err := expectedCredentialsCompareJSON(expectedCredentials)
 	if err != nil {
 		return false, err
 	}
@@ -1633,11 +1668,15 @@ func (r *accountRepository) UpdateGrokOAuthCredentialsIfUnchanged(
 	if r == nil || r.sql == nil {
 		return false, errors.New("account repository SQL executor is not configured")
 	}
-	expectedJSON, err := json.Marshal(normalizeJSONMap(expectedCredentials))
+	expectedJSON, err := expectedCredentialsCompareJSON(expectedCredentials)
 	if err != nil {
 		return false, err
 	}
-	credentialsJSON, err := json.Marshal(normalizeJSONMap(credentials))
+	prepared, prepErr := prepareCredentialsForStore(id, credentials, expectedJSON)
+	if prepErr != nil {
+		return false, prepErr
+	}
+	credentialsJSON, err := json.Marshal(normalizeJSONMap(prepared))
 	if err != nil {
 		return false, err
 	}
@@ -1693,7 +1732,7 @@ func (r *accountRepository) SetGrokOAuthRefreshErrorIfCredentialsUnchanged(
 	if r == nil || r.sql == nil {
 		return false, errors.New("account repository SQL executor is not configured")
 	}
-	expectedJSON, err := json.Marshal(normalizeJSONMap(expectedCredentials))
+	expectedJSON, err := expectedCredentialsCompareJSON(expectedCredentials)
 	if err != nil {
 		return false, err
 	}
@@ -1754,7 +1793,7 @@ func (r *accountRepository) SetGrokOAuthRefreshTempUnschedulableIfCredentialsUnc
 	if r == nil || r.sql == nil {
 		return false, errors.New("account repository SQL executor is not configured")
 	}
-	expectedJSON, err := json.Marshal(normalizeJSONMap(expectedCredentials))
+	expectedJSON, err := expectedCredentialsCompareJSON(expectedCredentials)
 	if err != nil {
 		return false, err
 	}
@@ -2916,7 +2955,7 @@ func (r *accountRepository) updateUpstreamBillingProbeSnapshotInTx(
 	if err != nil {
 		return err
 	}
-	credentials, err := json.Marshal(account.Credentials)
+	credentials, err := accountCredentialsIdentityJSON(account)
 	if err != nil {
 		return err
 	}
@@ -3680,7 +3719,7 @@ func accountEntityToService(m *dbent.Account) *service.Account {
 
 	rateMultiplier := m.RateMultiplier
 
-	return &service.Account{
+	acc := &service.Account{
 		ID:                      m.ID,
 		Name:                    m.Name,
 		Notes:                   m.Notes,
@@ -3713,6 +3752,69 @@ func accountEntityToService(m *dbent.Account) *service.Account {
 		ParentAccountID:         m.ParentAccountID,
 		QuotaDimension:          string(m.QuotaDimension),
 	}
+	hydrateAccountCredentials(acc)
+	return acc
+}
+
+func hydrateAccountCredentials(acc *service.Account) {
+	if acc == nil {
+		return
+	}
+	if raw, err := json.Marshal(normalizeJSONMap(acc.Credentials)); err == nil {
+		acc.StoredCredentialsJSON = string(raw)
+	}
+	crypto := service.CurrentSecretFieldCrypto()
+	if crypto == nil || !crypto.Enabled() {
+		return
+	}
+	decrypted, err := crypto.DecryptCredentialMap(acc.ID, acc.Credentials)
+	if err != nil {
+		acc.CredentialsDecryptErr = err
+		stripped := copyJSONMap(acc.Credentials)
+		for _, key := range service.SensitiveCredentialKeys {
+			delete(stripped, key)
+		}
+		acc.Credentials = stripped
+		return
+	}
+	acc.Credentials = decrypted
+}
+
+func prepareCredentialsForStore(accountID int64, plaintext map[string]any, previousRawJSON string) (map[string]any, error) {
+	var previous map[string]any
+	if strings.TrimSpace(previousRawJSON) != "" && previousRawJSON != "null" {
+		if err := json.Unmarshal([]byte(previousRawJSON), &previous); err != nil {
+			previous = nil
+		}
+	}
+	crypto := service.CurrentSecretFieldCrypto()
+	if crypto == nil || !crypto.Enabled() {
+		return normalizeJSONMap(plaintext), nil
+	}
+	return crypto.PrepareCredentials(accountID, plaintext, previous)
+}
+
+func expectedCredentialsCompareJSON(expected map[string]any) (string, error) {
+	b, err := json.Marshal(normalizeJSONMap(expected))
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+func accountCredentialsIdentityJSON(account *service.Account) (string, error) {
+	if account == nil {
+		return "{}", nil
+	}
+	prepared, err := prepareCredentialsForStore(account.ID, account.Credentials, account.StoredCredentialsJSON)
+	if err != nil {
+		return "", err
+	}
+	b, err := json.Marshal(normalizeJSONMap(prepared))
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
 }
 
 func normalizeJSONMap(in map[string]any) map[string]any {

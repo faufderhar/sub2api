@@ -82,7 +82,7 @@ func (s *PaymentConfigService) ProviderInstanceToResponse(inst *dbent.PaymentPro
 		Enabled: inst.Enabled, RefundEnabled: inst.RefundEnabled, AllowUserRefund: inst.AllowUserRefund,
 		SortOrder: inst.SortOrder, PaymentMode: inst.PaymentMode,
 	}
-	cfg, err := s.decryptAndMaskConfig(inst.ProviderKey, inst.Config)
+	cfg, err := s.decryptAndMaskConfig(inst.ID, inst.ProviderKey, inst.Config)
 	if err != nil {
 		return nil, fmt.Errorf("decrypt config for instance %d: %w", inst.ID, err)
 	}
@@ -94,8 +94,8 @@ func (s *PaymentConfigService) ProviderInstanceToResponse(inst *dbent.PaymentPro
 // Admin UIs display masked placeholders for these; the raw values never leave
 // the server. Callers that need the full config (e.g. payment runtime) must
 // use decryptConfig directly.
-func (s *PaymentConfigService) decryptAndMaskConfig(providerKey, encrypted string) (map[string]string, error) {
-	cfg, err := s.decryptConfig(encrypted)
+func (s *PaymentConfigService) decryptAndMaskConfig(instanceID int64, providerKey, encrypted string) (map[string]string, error) {
+	cfg, err := s.decryptConfig(instanceID, providerKey, encrypted)
 	if err != nil {
 		return nil, err
 	}
@@ -215,17 +215,31 @@ func (s *PaymentConfigService) CreateProviderInstance(ctx context.Context, req C
 			return nil, err
 		}
 	}
-	enc, err := s.encryptConfig(req.Config)
+	enc, err := s.encryptConfig(0, req.ProviderKey, req.Config)
 	if err != nil {
 		return nil, err
 	}
 	allowUserRefund := req.AllowUserRefund && req.RefundEnabled
-	return s.entClient.PaymentProviderInstance.Create().
+	inst, err := s.entClient.PaymentProviderInstance.Create().
 		SetProviderKey(req.ProviderKey).SetName(req.Name).SetConfig(enc).
 		SetSupportedTypes(typesStr).SetEnabled(req.Enabled).SetPaymentMode(req.PaymentMode).
 		SetSortOrder(req.SortOrder).SetLimits(req.Limits).SetRefundEnabled(req.RefundEnabled).
 		SetAllowUserRefund(allowUserRefund).
 		Save(ctx)
+	if err != nil {
+		return nil, err
+	}
+	rewritten, err := s.encryptConfig(inst.ID, req.ProviderKey, req.Config)
+	if err != nil {
+		return nil, err
+	}
+	if rewritten != enc {
+		inst, err = s.entClient.PaymentProviderInstance.UpdateOneID(inst.ID).SetConfig(rewritten).Save(ctx)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return inst, nil
 }
 
 func validateProviderRequest(providerKey, name, supportedTypes string) error {
@@ -334,7 +348,7 @@ func (s *PaymentConfigService) UpdateProviderInstance(ctx context.Context, id in
 	}
 	var mergedConfig map[string]string
 	if req.Config != nil {
-		currentConfig, err := s.decryptConfig(current.Config)
+		currentConfig, err := s.decryptConfig(current.ID, current.ProviderKey, current.Config)
 		if err != nil {
 			return nil, fmt.Errorf("decrypt existing config: %w", err)
 		}
@@ -365,7 +379,7 @@ func (s *PaymentConfigService) UpdateProviderInstance(ctx context.Context, id in
 	}
 	configToValidate := mergedConfig
 	if configToValidate == nil {
-		configToValidate, err = s.decryptConfig(current.Config)
+		configToValidate, err = s.decryptConfig(current.ID, current.ProviderKey, current.Config)
 		if err != nil {
 			return nil, fmt.Errorf("decrypt existing config: %w", err)
 		}
@@ -392,7 +406,7 @@ func (s *PaymentConfigService) UpdateProviderInstance(ctx context.Context, id in
 		u.SetName(*req.Name)
 	}
 	if mergedConfig != nil {
-		enc, err := s.encryptConfig(mergedConfig)
+		enc, err := s.encryptConfig(id, current.ProviderKey, mergedConfig)
 		if err != nil {
 			return nil, err
 		}
@@ -488,7 +502,7 @@ func (s *PaymentConfigService) mergeConfig(ctx context.Context, id int64, newCon
 	if err != nil {
 		return nil, fmt.Errorf("load existing provider: %w", err)
 	}
-	existing, err := s.decryptConfig(inst.Config)
+	existing, err := s.decryptConfig(inst.ID, inst.ProviderKey, inst.Config)
 	if err != nil {
 		return nil, fmt.Errorf("decrypt existing config for instance %d: %w", id, err)
 	}
@@ -515,26 +529,36 @@ func (s *PaymentConfigService) mergeConfig(ctx context.Context, id int64, newCon
 // TODO(deprecated-legacy-ciphertext): The AES fallback branch is a transitional
 // shim for pre-plaintext records. Remove it (and the encryptionKey field) after
 // a few releases once all live deployments have re-saved their provider configs.
-func (s *PaymentConfigService) decryptConfig(stored string) (map[string]string, error) {
+func (s *PaymentConfigService) decryptConfig(instanceID int64, providerKey, stored string) (map[string]string, error) {
 	if stored == "" {
 		return nil, nil
 	}
 	var cfg map[string]string
-	if err := json.Unmarshal([]byte(stored), &cfg); err == nil {
-		return cfg, nil
-	}
-	// Deprecated: legacy AES-256-GCM ciphertext fallback — scheduled for removal.
-	if len(s.encryptionKey) == payment.AES256KeySize {
-		//nolint:staticcheck // SA1019: intentional legacy fallback, scheduled for removal
-		if plaintext, err := payment.Decrypt(stored, s.encryptionKey); err == nil {
-			if err := json.Unmarshal([]byte(plaintext), &cfg); err == nil {
-				return cfg, nil
+	if err := json.Unmarshal([]byte(stored), &cfg); err != nil {
+		// Deprecated: legacy AES-256-GCM whole-config ciphertext fallback.
+		if len(s.encryptionKey) == payment.AES256KeySize {
+			//nolint:staticcheck // SA1019: intentional legacy fallback, scheduled for removal
+			if plaintext, err := payment.Decrypt(stored, s.encryptionKey); err == nil {
+				if err := json.Unmarshal([]byte(plaintext), &cfg); err == nil {
+					return cfg, nil
+				}
 			}
 		}
+		slog.Warn("payment provider config unreadable, treating as empty for re-entry",
+			"stored_len", len(stored))
+		return nil, nil
 	}
-	slog.Warn("payment provider config unreadable, treating as empty for re-entry",
-		"stored_len", len(stored))
-	return nil, nil
+	crypto := CurrentSecretFieldCrypto()
+	if crypto == nil || !crypto.Enabled() {
+		return cfg, nil
+	}
+	decrypted, err := crypto.DecryptPaymentConfig(instanceID, cfg, func(field string) bool {
+		return isSensitiveProviderConfigField(providerKey, field)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return decrypted, nil
 }
 
 func (s *PaymentConfigService) DeleteProviderInstance(ctx context.Context, id int64) error {
@@ -552,7 +576,20 @@ func (s *PaymentConfigService) DeleteProviderInstance(ctx context.Context, id in
 // encryptConfig serialises a provider config for storage.
 // New records are written as plaintext JSON; the historical AES-GCM wrapping
 // has been dropped but decryptConfig still accepts old ciphertext during migration.
-func (s *PaymentConfigService) encryptConfig(cfg map[string]string) (string, error) {
+func (s *PaymentConfigService) encryptConfig(instanceID int64, providerKey string, cfg map[string]string) (string, error) {
+	crypto := CurrentSecretFieldCrypto()
+	if crypto != nil && crypto.Enabled() {
+		if err := crypto.RequirePersistentWrite(); err != nil {
+			return "", err
+		}
+		encrypted, err := crypto.EncryptPaymentConfig(instanceID, cfg, func(field string) bool {
+			return isSensitiveProviderConfigField(providerKey, field)
+		})
+		if err != nil {
+			return "", err
+		}
+		cfg = encrypted
+	}
 	data, err := json.Marshal(cfg)
 	if err != nil {
 		return "", fmt.Errorf("marshal config: %w", err)

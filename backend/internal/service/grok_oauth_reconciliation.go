@@ -232,7 +232,7 @@ func (s *TokenRefreshService) ReconcileGrokOAuth(ctx context.Context, input Grok
 			applied, err := conditionalErrorRepo.SetGrokOAuthErrorIfCredentialsUnchanged(
 				ctx,
 				account.ID,
-				account.Credentials,
+				account.CredentialsForCompare(),
 				"Grok OAuth credential reconciliation: missing refresh token",
 			)
 			if err != nil {

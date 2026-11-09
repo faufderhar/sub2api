@@ -151,6 +151,10 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			h.errorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
 			return
 		}
+		if applyRequestBodyReadTimeout(c, err) {
+			h.errorResponse(c, http.StatusRequestTimeout, requestBodyReadTimeoutType, requestBodyReadTimeoutMessage)
+			return
+		}
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
 		return
 	}
@@ -2160,6 +2164,10 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 	if err != nil {
 		if maxErr, ok := extractMaxBytesError(err); ok {
 			h.errorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
+			return
+		}
+		if applyRequestBodyReadTimeout(c, err) {
+			h.errorResponse(c, http.StatusRequestTimeout, requestBodyReadTimeoutType, requestBodyReadTimeoutMessage)
 			return
 		}
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")

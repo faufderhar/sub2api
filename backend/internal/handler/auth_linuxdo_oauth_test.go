@@ -242,8 +242,9 @@ func TestLinuxDoOAuthCallbackAllowsMissingVerifierWhenPKCEDisabled(t *testing.T)
 
 	require.Equal(t, http.StatusFound, recorder.Code)
 	location := recorder.Header().Get("Location")
-	require.Contains(t, location, "/auth/linuxdo/callback#")
-	require.Contains(t, location, "access_token=")
+	require.Contains(t, location, "/auth/linuxdo/callback?")
+	require.Contains(t, location, "completion_code=")
+	require.NotContains(t, location, "access_token=")
 	requireCookieCleared(t, recorder, oauthPendingSessionCookieName)
 
 	identity, err := client.AuthIdentity.Query().
@@ -777,9 +778,12 @@ func TestLinuxDoOAuthCallbackDirectlyLogsInNewUserWhenEmailVerificationDisabled(
 
 	require.Equal(t, http.StatusFound, recorder.Code)
 	location := recorder.Header().Get("Location")
-	require.Contains(t, location, "/auth/linuxdo/callback#")
-	require.Contains(t, location, "access_token=")
-	require.Contains(t, location, "refresh_token=")
+	require.Contains(t, location, "/auth/linuxdo/callback?")
+	require.Contains(t, location, "completion_code=")
+	require.NotContains(t, location, "access_token=")
+	require.Contains(t, location, "completion_code=")
+	require.NotContains(t, location, "refresh_token=")
+	require.NotContains(t, location, "access_token=")
 	fragmentValues := parseOAuthRedirectFragment(t, location)
 	require.Equal(t, "/dashboard", fragmentValues.Get("redirect"))
 	requireCookieCleared(t, recorder, oauthPendingSessionCookieName)
@@ -806,7 +810,7 @@ func TestLinuxDoOAuthCallbackDirectlyLogsInNewUserWhenEmailVerificationDisabled(
 
 	sessionCount, err := client.PendingAuthSession.Query().Count(ctx)
 	require.NoError(t, err)
-	require.Zero(t, sessionCount)
+	require.Equal(t, 1, sessionCount)
 }
 
 func TestLinuxDoOAuthCallbackCreatesBindPendingSessionForCurrentUser(t *testing.T) {
@@ -1106,7 +1110,7 @@ func TestCompleteLinuxDoOAuthRegistrationBindsIdentityWithoutAdoptionFlags(t *te
 	require.Equal(t, http.StatusOK, recorder.Code)
 	responseData := decodeJSONBody(t, recorder)
 	require.NotEmpty(t, responseData["access_token"])
-	require.NotEmpty(t, responseData["refresh_token"])
+	require.NotContains(t, responseData, "refresh_token")
 
 	userEntity, err := client.User.Query().
 		Where(dbuser.EmailEQ(session.ResolvedEmail)).

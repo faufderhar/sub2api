@@ -836,7 +836,7 @@ func TestCompleteOIDCOAuthRegistrationBindsIdentityWithoutAdoptionFlags(t *testi
 	require.Equal(t, http.StatusOK, recorder.Code)
 	responseData := decodeJSONBody(t, recorder)
 	require.NotEmpty(t, responseData["access_token"])
-	require.NotEmpty(t, responseData["refresh_token"])
+	require.NotContains(t, responseData, "refresh_token")
 
 	userEntity, err := client.User.Query().
 		Where(dbuser.EmailEQ(session.ResolvedEmail)).
@@ -958,9 +958,12 @@ func TestTryOIDCVerifiedEmailFastPathCreatesUserAndIdentity(t *testing.T) {
 
 	location := recorder.Header().Get("Location")
 	require.Contains(t, location, "/auth/oidc/callback")
-	require.Contains(t, location, "access_token=")
-	require.Contains(t, location, "refresh_token=")
-	require.Contains(t, location, "token_type=Bearer")
+	require.Contains(t, location, "completion_code=")
+	require.NotContains(t, location, "access_token=")
+	require.Contains(t, location, "completion_code=")
+	require.NotContains(t, location, "refresh_token=")
+	require.NotContains(t, location, "access_token=")
+	require.Contains(t, location, "completion_code=")
 
 	user, err := client.User.Query().Where(dbuser.EmailEQ("fastpath@example.com")).Only(ctx)
 	require.NoError(t, err)
@@ -979,7 +982,7 @@ func TestTryOIDCVerifiedEmailFastPathCreatesUserAndIdentity(t *testing.T) {
 
 	pendingCount, err := client.PendingAuthSession.Query().Count(ctx)
 	require.NoError(t, err)
-	require.Zero(t, pendingCount)
+	require.Equal(t, 1, pendingCount)
 }
 
 func TestOIDCOAuthCallbackVerifiedEmailFastPathIssuesTokenWithoutPendingSession(t *testing.T) {
@@ -1011,10 +1014,13 @@ func TestOIDCOAuthCallbackVerifiedEmailFastPathIssuesTokenWithoutPendingSession(
 
 	require.Equal(t, http.StatusFound, recorder.Code)
 	location := recorder.Header().Get("Location")
-	require.Contains(t, location, "/auth/oidc/callback#")
-	require.Contains(t, location, "access_token=")
-	require.Contains(t, location, "refresh_token=")
-	require.Contains(t, location, "token_type=Bearer")
+	require.Contains(t, location, "/auth/oidc/callback?")
+	require.Contains(t, location, "completion_code=")
+	require.NotContains(t, location, "access_token=")
+	require.Contains(t, location, "completion_code=")
+	require.NotContains(t, location, "refresh_token=")
+	require.NotContains(t, location, "access_token=")
+	require.Contains(t, location, "completion_code=")
 	fragmentValues := parseOAuthRedirectFragment(t, location)
 	require.Equal(t, "/dashboard", fragmentValues.Get("redirect"))
 	requireCookieCleared(t, recorder, oauthPendingSessionCookieName)
@@ -1040,7 +1046,7 @@ func TestOIDCOAuthCallbackVerifiedEmailFastPathIssuesTokenWithoutPendingSession(
 
 	pendingCount, err := client.PendingAuthSession.Query().Count(ctx)
 	require.NoError(t, err)
-	require.Zero(t, pendingCount)
+	require.Equal(t, 1, pendingCount)
 }
 
 func TestOIDCOAuthCallbackVerifiedEmailFastPathBackendModeBlocksBeforeUserCreation(t *testing.T) {

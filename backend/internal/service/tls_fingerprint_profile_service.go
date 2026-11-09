@@ -2,7 +2,8 @@ package service
 
 import (
 	"context"
-	"math/rand/v2"
+	"fmt"
+	"slices"
 	"sync"
 	"time"
 
@@ -145,29 +146,6 @@ func (s *TLSFingerprintProfileService) GetProfileByID(id int64) *tlsfingerprint.
 	return nil
 }
 
-// getRandomProfile 从本地缓存中随机选择一个 Profile
-func (s *TLSFingerprintProfileService) getRandomProfile() *tlsfingerprint.Profile {
-	s.localMu.RLock()
-	defer s.localMu.RUnlock()
-
-	if len(s.localCache) == 0 {
-		return nil
-	}
-
-	// 收集所有 profile
-	profiles := make([]*model.TLSFingerprintProfile, 0, len(s.localCache))
-	for _, p := range s.localCache {
-		if p != nil {
-			profiles = append(profiles, p)
-		}
-	}
-	if len(profiles) == 0 {
-		return nil
-	}
-
-	return profiles[rand.IntN(len(profiles))].ToTLSProfile()
-}
-
 // ResolveTLSProfile 根据 Account 的配置解析出运行时 TLS Profile
 //
 // 逻辑：
@@ -184,14 +162,37 @@ func (s *TLSFingerprintProfileService) ResolveTLSProfile(account *Account) *tlsf
 			return p
 		}
 	}
-	if id == -1 {
-		// 随机选择一个 profile
-		if p := s.getRandomProfile(); p != nil {
-			return p
-		}
+	// R3-FP D10: 未显式绑定（含历史 -1 随机）改为按账号哈希固定选取。
+	if p := s.getStickyProfile(account); p != nil {
+		return p
 	}
 	// TLS 启用但无绑定 profile → 空 Profile → dialer 使用内置默认值
 	return &tlsfingerprint.Profile{Name: "Built-in Default (Node.js 24.x)"}
+}
+
+func (s *TLSFingerprintProfileService) ProfileIDs() []int64 { return s.listProfileIDs() }
+
+func (s *TLSFingerprintProfileService) listProfileIDs() []int64 {
+	s.localMu.Lock()
+	defer s.localMu.Unlock()
+	ids := make([]int64, 0, len(s.localCache))
+	for id := range s.localCache {
+		ids = append(ids, id)
+	}
+	slices.Sort(ids)
+	return ids
+}
+
+func (s *TLSFingerprintProfileService) getStickyProfile(account *Account) *tlsfingerprint.Profile {
+	ids := s.listProfileIDs()
+	if len(ids) == 0 {
+		return nil
+	}
+	seed := fmt.Sprintf("%d", account.ID)
+	if account.IsAnthropicOAuthOrSetupToken() {
+		seed = fmt.Sprintf("account:%d", account.ID)
+	}
+	return s.GetProfileByID(ids[stickyIndex(seed, len(ids))])
 }
 
 // --- 缓存管理 ---

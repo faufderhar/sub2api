@@ -47,7 +47,7 @@ const (
 // NewStepUpAuthMiddleware 创建敏感操作 step-up 2FA 门控中间件。
 //
 // M-7 / D2a：挂在本中间件上的路由**始终**要求 step-up，不再读取 step_up_enabled
-// 功能开关（该开关现在只影响 EnforceStepUp 的按请求内容触发的门控，如创建/提升管理员）。
+// 功能开关（该开关现在只影响仍走 EnforceStepUp 的按请求内容触发的门控；创建/提升管理员与 MCP 只读授权已改为始终门控）。
 // 通过条件（全部满足）：
 //  1. 必须是 JWT 认证的真人会话——admin API key（机器凭证）一律拒绝
 //  2. 当前用户已启用 TOTP（未启用则拒绝并提示先启用 2FA）

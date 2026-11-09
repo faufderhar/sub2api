@@ -56,6 +56,10 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 			return
 		}
 		logRequestBodyReadFailure(reqLog, c.Request, err)
+		if applyRequestBodyReadTimeout(c, err) {
+			h.errorResponse(c, http.StatusRequestTimeout, requestBodyReadTimeoutType, requestBodyReadTimeoutMessage)
+			return
+		}
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
 		return
 	}
